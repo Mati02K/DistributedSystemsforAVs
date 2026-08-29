@@ -1,7 +1,8 @@
 # Ablation studies — what each figure shows, and why it looks that way
 
 Generated from the run of **2026-08-27**. ab1's k=0 cells and ab3/ab4 use 9 repetitions; ab2 and ab5 use 3. Regenerate with, inside
-`opp_env` and with `veins_launchd` on :9999:
+`opp_env` and with `veins_launchd` on :9999 (see
+[../INSTALLATION.md](../INSTALLATION.md)):
 
 ```bash
 benchmarks/ablations/run_ablations.sh <1..5|all> [reps]   # -> benchmarks/ablations/results/

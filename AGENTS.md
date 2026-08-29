@@ -1,4 +1,4 @@
-# CLAUDE.md — 12-rule template
+# AGENTS.md — 12-rule template
 
 These rules apply to every task in this project unless explicitly overridden.
 Bias: caution over speed on non-trivial work. Use judgment on trivial tasks.

@@ -47,67 +47,15 @@ and patches them into `.external/`. See
 [third_party/README.md](third_party/README.md) for what the patches change and
 how to regenerate them after editing.
 
-## Prerequisites
+## Getting started
 
-- **OMNeT++ 6.2.0** via `opp_env` — not vendored, and every command below
-  assumes you are inside its shell:
-  ```bash
-  opp_env shell -w <workspace> omnetpp-6.2.0 --no-build --no-cleanup
-  ```
-- **SUMO** on `PATH`.
-- **Bazel** (for the ResilientDB bridge) and **OpenSSL** headers.
-
-## Quick start
+Installing the toolchain, building the four stages, running a simulation, and
+checking the result are all in **[INSTALLATION.md](INSTALLATION.md)**.
 
 ```bash
-./setup.sh
+tools/check-prereqs.sh    # is this machine ready?
+./setup.sh                # clone, patch, build everything, generate keys
 ```
-
-That clones and patches both upstreams, builds the bridge, Veins, `libv2vbft`
-and the simulation binary, and generates the replica key directories. Cold, it
-takes about ten minutes — nearly all of it Bazel compiling ResilientDB's
-dependencies. It is idempotent, so re-running skips whatever is already done.
-
-The four build stages, if you want to drive them individually:
-
-| Stage | Command | Produces |
-|---|---|---|
-| 1. Bridge | `tools/makeres.sh` | `libresdb_omnet_bridge.so` |
-| 2. Veins | `cd .external/veins && ./configure && make -j` | `libveins.so` |
-| 3. Protocol | `cd src && make -j` | `libv2vbft.so` |
-| 4. Simulation | `cd scenarios/fourway && make -j` | `fourway` |
-
-The binaries must be built locally — a committed one carries an rpath to
-whichever machine built it.
-
-## Run
-
-```bash
-tools/run-resdb-simulation.sh -u Cmdenv -c FourVehiclesResDB   # headless
-tools/run-resdb-simulation.sh -u Qtenv  -c FourVehiclesResDB   # GUI
-```
-
-Configs live in `scenarios/fourway/omnetpp.ini`. Useful flags:
-
-| Flag | Effect |
-|---|---|
-| `--byzleader <id> --leader-byz-type <n>` | make a replica Byzantine; `<n>` is a `ByzantineType` from `src/v2vbft/protocol/Primitives.h` |
-| `--no-firewall` | disable the f+1 pre-verification checks |
-| `--randomize <N> <F>` | generate a random scenario |
-| `--rollback-late-emergency` | late-ambulance rollback scenario |
-| `--tolerated-f <n>` | override the tolerated fault count |
-
-Both value-taking flags need their value; passing `--byzleader` bare silently
-consumes the next argument.
-
-Full log goes to `/tmp/resdb-simulation.log`, or `$LOG_FILE` if set.
-
-**Replica key directories must match the replica count** — the bridge derives N
-from `server.config`, and a directory declaring the wrong N runs with no
-consensus while reporting nothing obviously wrong. `setup.sh` generates all
-eight (`resdb_crypto` = 4 replicas, `_8`, `_12`, `_16`, `_20`, `_24`, `_rb18` =
-18, `_rb_units` = 22). To make one by hand:
-`tools/gen_crypto_dir.sh <N> scenarios/fourway/<dir>`.
 
 ## Figures
 
@@ -148,24 +96,4 @@ python3 tests/golden/run_golden.py capture --from-logs   # rebuild without re-ru
 The 18-vehicle rollback cells take ~7 minutes per run, so a full matrix is
 roughly 55 minutes. Never run a simulation concurrently with the harness unless
 `LOG_FILE` is set per run.
-
-## Troubleshooting
-
-**`OMNETPP_ROOT is not set`** — you are outside the `opp_env` shell.
-
-**`libveins.so` / `libv2vbft.so`: cannot open shared object file** — rebuild
-stages 2–4 locally.
-
-**Exit 139 / 133 on 18-vehicle runs** — a known TraCI crash when a node queries
-a departed vehicle after sim overrun. It fires *after* the commit, so metrics
-are unaffected; the golden harness judges the invariants, not the exit code.
-
-**Bazel fails on Boost `int_float_mixture_enum`, or `<cstdint> file not
-found`** — your Clang is newer than the pinned Boost expects. `tools/makeres.sh`
-already passes the necessary suppressions and `-xc++`; use it rather than
-calling `bazel build` directly.
-
-**Patch fails to apply during `setup.sh`** — the pinned upstream revision moved
-or your `.external/` is dirty. Delete the offending tree under `.external/` and
-re-run.
 

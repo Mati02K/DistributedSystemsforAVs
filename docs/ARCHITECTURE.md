@@ -1481,6 +1481,13 @@ Common log markers used by benchmark scripts and debugging:
 
 ## 21. Build and Run Handoff
 
+First-time setup, toolchain prerequisites, and how to verify a run are in
+[../INSTALLATION.md](../INSTALLATION.md). This section covers only incremental
+rebuilds during development.
+
+All of it assumes you are inside the `opp_env` shell, and that `veins_launchd`
+is already running in another terminal.
+
 Rebuild bottom-up: bridge, then Veins, then the protocol, then the scenario.
 Each stage links the one above it.
 
