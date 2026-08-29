@@ -185,11 +185,19 @@ append_ld_library_path() {
     fi
     # macOS dyld does not use LD_LIBRARY_PATH. Nix-built OMNeT++ / mixed OpenSSL without
     # this yields dyld: missing symbol called (exit 134) when loading libveins / bridge.
+    #
+    # FALLBACK, not DYLD_LIBRARY_PATH: the latter is searched BEFORE the normal
+    # lookup, so it also intercepts the system frameworks. On macOS 26 that makes
+    # Qt's SandboxChecker thread fault inside Security's SecStaticCodeCreateWithPath
+    # and the run dies with SIGBUS (exit 138) before the first event. The fallback
+    # variable is consulted only after the normal search, which still resolves the
+    # Nix and bridge libraries this needs while leaving the system frameworks alone.
     if [[ "$(uname -s)" == "Darwin" ]]; then
-        if [[ -n "${DYLD_LIBRARY_PATH:-}" ]]; then
-            export DYLD_LIBRARY_PATH="${extra_path}:${DYLD_LIBRARY_PATH}"
+        if [[ -n "${DYLD_FALLBACK_LIBRARY_PATH:-}" ]]; then
+            export DYLD_FALLBACK_LIBRARY_PATH="${extra_path}:${DYLD_FALLBACK_LIBRARY_PATH}"
         else
-            export DYLD_LIBRARY_PATH="${extra_path}"
+            # Setting this replaces dyld's default fallback, so restate the default.
+            export DYLD_FALLBACK_LIBRARY_PATH="${extra_path}:${HOME}/lib:/usr/local/lib:/lib:/usr/lib"
         fi
     fi
 }
