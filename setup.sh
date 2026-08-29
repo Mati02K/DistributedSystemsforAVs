@@ -33,6 +33,16 @@ say()  { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 warn() { printf '\033[33mwarning: %s\033[0m\n' "$*" >&2; }
 die()  { printf '\033[31merror: %s\033[0m\n' "$*" >&2; exit 1; }
 
+# ── 0. Prerequisites ─────────────────────────────────────────────────────────
+# Checked up front: a missing tool otherwise surfaces as a Bazel or Clang error
+# ten minutes into the build, which is far harder to read than the real cause.
+# Only the build path needs the toolchain — --verify and --no-build inspect or
+# clone trees and need nothing beyond git.
+if [[ "$DO_BUILD" -eq 1 ]]; then
+  "${REPO_ROOT}/tools/check-prereqs.sh" \
+    || die "prerequisites missing — see above, or re-run tools/check-prereqs.sh"
+fi
+
 # Read one field out of versions.lock. Fields: url kind ref patch
 lock_field() {
   local name="$1" col="$2"
