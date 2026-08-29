@@ -8,7 +8,7 @@
       0
     ],
     "n_batches": [
-      2
+      4
     ],
     "quorum": [],
     "reporting_replicas": [
@@ -29,7 +29,7 @@
       0
     ],
     "n_batches": [
-      2
+      4
     ],
     "quorum": [],
     "reporting_replicas": [
@@ -50,7 +50,7 @@
       0
     ],
     "n_batches": [
-      2
+      4
     ],
     "quorum": [],
     "reporting_replicas": [
@@ -71,12 +71,11 @@
       0
     ],
     "n_batches": [
-      2
+      4
     ],
     "quorum": [],
     "reporting_replicas": [
-      4,
-      5
+      4
     ],
     "reps": 3,
     "rollback_fired": [
@@ -93,7 +92,8 @@
       0
     ],
     "n_batches": [
-      9
+      11,
+      12
     ],
     "quorum": [
       11
@@ -118,7 +118,7 @@
       0
     ],
     "n_batches": [
-      13
+      16
     ],
     "quorum": [
       13
@@ -137,8 +137,7 @@
   "units_4veh": {
     "commit_rate": 1.0,
     "committing_replicas": [
-      6,
-      7
+      8
     ],
     "fallbacks": [
       0
