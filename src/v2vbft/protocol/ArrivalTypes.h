@@ -39,6 +39,14 @@ struct ArrivalAnnouncement {
     bool                 isAmbulance         = false;
     double               claimedArrivalTime  = 0.0;
     int                  epoch               = 0;
+    // Where the vehicle says it is across the lane, in centimetres on the
+    // lane-normal axis. Only meaningful under ADJACENT_LATERAL, where an
+    // approach has two parallel lanes and "which lane" is a claim a witness can
+    // check against a continuous observation rather than take on trust.
+    // physicalLaneIndex is the discrete claim that lateralClaimCm must project
+    // to; -1 means the vehicle is not making one.
+    int32_t              lateralClaimCm      = 0;
+    int                  physicalLaneIndex   = -1;
     std::vector<uint8_t> ambulanceCertBytes;
     std::vector<uint8_t> ambulanceSigBytes;
     std::vector<uint8_t> signature;

@@ -40,6 +40,22 @@ BFTMessage* makeArrivalAnnouncementMessage(const std::vector<uint8_t>& payload,
     return msg;
 }
 
+// Identity of a claim, for caching one perception verdict per claim.
+//
+// Keyed on content rather than on sender or arrival order, so a re-announcement
+// or a gossiped copy of the same claim reuses the same observation, while a
+// vehicle that changes what it claims is observed afresh. Deliberately excludes
+// the signature: a Byzantine sender re-signing an identical claim must not be
+// able to buy a second draw.
+std::string arrivalClaimKey(const ArrivalAnnouncement& ann)
+{
+    std::stringstream ss;
+    ss << ann.carId << ':' << ann.epoch << ':' << ann.lane << ':'
+       << ann.positionInLane << ':' << static_cast<int>(ann.direction) << ':'
+       << ann.lateralClaimCm << ':' << ann.physicalLaneIndex;
+    return ss.str();
+}
+
 } // namespace
 
 std::vector<uint8_t> ResDBIntersectionApp::serializeArrivalAnnouncement(
@@ -55,6 +71,8 @@ std::vector<uint8_t> ResDBIntersectionApp::serializeArrivalAnnouncement(
        << (ann.isAmbulance ? "1" : "0") << "|"
        << ann.claimedArrivalTime << "|"
        << ann.epoch          << "|"
+       << ann.lateralClaimCm    << "|"
+       << ann.physicalLaneIndex << "|"
        << toHex(ann.ambulanceCertBytes) << "|"
        << toHex(ann.ambulanceSigBytes)  << "|"
        << ann.signature.size() << "|";
@@ -72,7 +90,7 @@ ResDBIntersectionApp::deserializeArrivalAnnouncement(BFTMessage* msg)
     std::string s(payload.begin(), payload.end());
     auto parts = splitStr(s, '|');
     ArrivalAnnouncement ann;
-    if (parts.size() >= 11) {
+    if (parts.size() >= 13) {
         ann.carId              = parts[0];
         ann.laneId             = parts[1];
         ann.lane               = parts[2];
@@ -81,11 +99,13 @@ ResDBIntersectionApp::deserializeArrivalAnnouncement(BFTMessage* msg)
         ann.isAmbulance        = (parts[5] == "1");
         ann.claimedArrivalTime = std::stod(parts[6]);
         ann.epoch              = std::stoi(parts[7]);
-        ann.ambulanceCertBytes = fromHex(parts[8]);
-        ann.ambulanceSigBytes  = fromHex(parts[9]);
-        int siglen = std::stoi(parts[10]);
+        ann.lateralClaimCm     = std::stoi(parts[8]);
+        ann.physicalLaneIndex  = std::stoi(parts[9]);
+        ann.ambulanceCertBytes = fromHex(parts[10]);
+        ann.ambulanceSigBytes  = fromHex(parts[11]);
+        int siglen = std::stoi(parts[12]);
         size_t p = s.find('|');
-        for (int k = 1; k < 11 && p != std::string::npos; ++k) p = s.find('|', p + 1);
+        for (int k = 1; k < 13 && p != std::string::npos; ++k) p = s.find('|', p + 1);
         size_t offset = (p != std::string::npos) ? p + 1 : s.size();
         if (offset < payload.size() && offset + (size_t)siglen <= payload.size())
             ann.signature.assign(payload.begin() + offset, payload.begin() + offset + siglen);
@@ -574,6 +594,18 @@ void ResDBIntersectionApp::broadcastArrivalAnnouncement(bool forceEmergency)
     ann.claimedArrivalTime = simTime().dbl();
     ann.epoch              = (int)ctx_.current_epoch_;
 
+    // Under ADJACENT_LATERAL the vehicle also states where it is across the
+    // lane, and which of the two physical lanes that puts it in. Both are
+    // claims, not measurements a witness has to accept: the witness re-derives
+    // the projection from the stated coordinate and compares against its own
+    // observation. Left at the defaults under CATEGORICAL_CARDINAL, where an
+    // approach has one lane and there is nothing to disambiguate.
+    if (perception_ &&
+            lane_observation_mode_ == LaneObservationMode::ADJACENT_LATERAL) {
+        ann.lateralClaimCm    = perception_->ownLateralClaimCm(simTime());
+        ann.physicalLaneIndex = perception_->projectPhysicalLaneIndex(ann.lateralClaimCm);
+    }
+
     // ECDSA P-256 self-signed claim.
     if (ctx_.ec_private_key_) {
         std::string toSign = ann.carId + ":" + ann.laneId + ":" +
@@ -757,7 +789,79 @@ void ResDBIntersectionApp::handleArrivalAnnouncement(BFTMessage* msg,
                   ann.laneId,
                   static_cast<double>(ann.positionInLane)};
     } else {
-        result = verifyCarPosition(ann.carId, ann.laneId, ann.positionInLane, 1e9);
+        // The physical gate. This used to be verifyCarPosition(), which asked
+        // TraCI where the vehicle really was -- an oracle no real vehicle has.
+        // A witness now endorses a claim only if its own (noisy) observation
+        // agrees with it, which is what makes a lane lie something the protocol
+        // catches by sensing rather than by consulting ground truth.
+        //
+        // Two independent conditions, reported separately so a rejection says
+        // which one failed:
+        //   cardinal  -- observed approach letter equals the claimed one
+        //   lateral   -- ADJACENT_LATERAL only: the claimed cross-lane position
+        //                is within physicalGateK sigmas of what was observed,
+        //                and the discrete lane index the vehicle claims is the
+        //                one its own lateral claim projects to
+        const std::string sampleKey = arrivalClaimKey(ann);
+        auto sampleIt = arrival_perception_samples_.find(sampleKey);
+        ArrivalPerceptionSample sample;
+        if (sampleIt == arrival_perception_samples_.end()) {
+            sample = perception_ ? perception_->observeArrival(ann.carId, simTime())
+                                 : ArrivalPerceptionSample{};
+            arrival_perception_samples_[sampleKey] = sample;
+        }
+        else {
+            sample = sampleIt->second;
+        }
+
+        const bool adjacentMode =
+            lane_observation_mode_ == LaneObservationMode::ADJACENT_LATERAL;
+        const bool cardinalMatch = sample.detected && ann.lane.size() == 1 &&
+            sample.observedApproach == ann.lane.front();
+        const int projectedLane = perception_
+            ? perception_->projectPhysicalLaneIndex(ann.lateralClaimCm) : -1;
+        const bool claimSemanticsValid = !adjacentMode ||
+            ((ann.physicalLaneIndex == 0 || ann.physicalLaneIndex == 1) &&
+             projectedLane == ann.physicalLaneIndex);
+        const int64_t lateralResidualCm = adjacentMode && sample.lateralCoordinateValid
+            ? std::llabs(static_cast<int64_t>(sample.observedLateralCm) -
+                         static_cast<int64_t>(ann.lateralClaimCm))
+            : 0;
+        const double lateralToleranceCm = adjacentMode
+            ? par("physicalGateK").doubleValue() *
+              par("lateralObservationSigmaM").doubleValue() * 100.0
+            : 0.0;
+        const bool lateralMatch = !adjacentMode ||
+            (sample.lateralCoordinateValid && claimSemanticsValid &&
+             static_cast<double>(lateralResidualCm) <= lateralToleranceCm + 1e-9);
+        const bool laneMatch = cardinalMatch && lateralMatch;
+
+        const char* laneReason = !sample.detected        ? "NO_PERCEPTION"
+                               : !cardinalMatch          ? "WRONG_APPROACH"
+                               : !claimSemanticsValid    ? "INVALID_PHYSICAL_LANE"
+                               : !lateralMatch           ? "LATERAL_RESIDUAL"
+                                                         : "OK";
+        result = {laneMatch,
+                  laneReason,
+                  sample.detected ? std::string(1, sample.observedApproach)
+                                  : std::string(),
+                  static_cast<double>(ann.positionInLane)};
+
+        std::cout << "[PERC-EVAL] witness=" << ctx_.replicaId_
+                  << " target=" << ann.carId
+                  << " epoch=" << ann.epoch
+                  << " verdict=" << (laneMatch ? "ACCEPT" : "REJECT")
+                  << " reason=" << laneReason
+                  << " mode=" << (adjacentMode ? "ADJACENT_LATERAL"
+                                               : "CATEGORICAL_CARDINAL")
+                  << " claimedLane=" << ann.lane
+                  << " observedLane=" << (sample.detected ? sample.observedApproach : '?')
+                  << " trueLane=" << sample.trueApproach
+                  << " claimedLateralCm=" << ann.lateralClaimCm
+                  << " observedLateralCm=" << sample.observedLateralCm
+                  << " residualCm=" << lateralResidualCm
+                  << " toleranceCm=" << lateralToleranceCm
+                  << "\n";
     }
 
     if (!result.isValid) {

@@ -261,6 +261,28 @@ found`** — your Clang is newer than the pinned Boost expects. `tools/makeres.s
 already passes the necessary suppressions and `-xc++`; use it rather than
 calling `bazel build` directly.
 
+**`cd src && make` suddenly fails with `undefined symbol:
+ResdbOmnetCreateKvServer`** (and a dozen sibling `ResdbOmnet*` symbols) after a
+build that previously worked — the bridge library has vanished, not your code.
+`tools/makeres.sh` defaults `BAZEL_OUTPUT_ROOT` to `/tmp/bazel`, and macOS
+prunes `/private/tmp`, so `.external/resilientdb/bazel-bin` is left dangling at
+a path that no longer exists. Confirm with:
+
+```bash
+ls -l .external/resilientdb/bazel-bin/integration/omnet/libresdb_omnet_bridge.dylib
+```
+
+Rebuild with `tools/makeres.sh` (~8 min cold). To stop it recurring, point the
+cache somewhere durable — the tradeoff is disk, and it is the one variable this
+build is otherwise known to work with:
+
+```bash
+BAZEL_OUTPUT_ROOT="$HOME/.cache/bazel-v2vbft" tools/makeres.sh
+```
+
+Note the failure is a *link* error, so the compiler will have reported your
+sources as fine — the missing library is the whole cause.
+
 **Patch fails to apply during `setup.sh`** — the pinned upstream revision moved
 or your `.external/` is dirty. Delete the offending tree under `.external/` and
 re-run.

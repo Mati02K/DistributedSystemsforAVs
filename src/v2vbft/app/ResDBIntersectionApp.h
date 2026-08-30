@@ -520,6 +520,14 @@ private:
     std::unique_ptr<ResDBPerception> perception_;
     LaneObservationMode lane_observation_mode_ = LaneObservationMode::CATEGORICAL_CARDINAL;
 
+    // One observation per distinct claim, keyed by its content. A vehicle
+    // re-announces on a timer and its announcement is also gossiped, so without
+    // this the same claim would be re-observed repeatedly -- drawing fresh noise
+    // each time and letting a liar retry until a draw happens to favour it.
+    // Caching the sample makes a witness's verdict a function of the claim, not
+    // of how many times it was heard.
+    std::map<std::string, ArrivalPerceptionSample> arrival_perception_samples_;
+
     cMessage* smoke_test_msg_          = nullptr;
     cMessage* transport_poll_msg_      = nullptr;
     cMessage* time_tick_msg_           = nullptr;
