@@ -229,11 +229,28 @@ any effect; at 2.0 m it is 21%, i.e. one observation in five lands on the wrong
 approach.
 
 **Perception error is absorbed by certificate collection before it reaches
-consensus.** Collection time is flat to sigma 0.25, rises at 0.5, and saturates
-by 1.0; commit rate and crossings do not move. A witness that misreads a car
-withholds its echo, the car waits for another witness, and the round takes
-longer — which is the designed behaviour, not a degradation, because f+1 echoes
-are still reachable while a majority of witnesses read the car correctly.
+consensus.** Commit rate and crossings do not move at any sigma. A witness that
+misreads a car withholds its echo, the car waits for another witness, and the
+round takes longer — the designed behaviour, not a degradation, because f+1
+echoes remain reachable while most witnesses read the car correctly.
+
+**Read the collection panel as points, not as a curve.** The underlying samples
+from the N=4 slice are:
+
+| sigma | `Cert_Collection_Duration` observed | plotted mean |
+|---|---|---|
+| 0 | `0.0044` | 0.004 |
+| 0.25 m | `0.0044` | 0.004 |
+| 0.5 m | `0.0048`, `5.7` | 2.85 |
+| 1.0 m | `8` | 8 |
+| 2.0 m | `8` | 8 |
+
+Only replicas that assemble a certificate emit the marker, so a point is a mean
+over one or two observations, not four. **The sigma=0.5 mean is an artefact**:
+it averages one vehicle certified in 5 ms with one that took 5.7 s. Collection
+time does not rise there, it *splits* — which is the more interesting reading,
+because it locates where sensor error begins costing individual vehicles rather
+than the system. Confirming that as bimodal rather than noise needs repetitions.
 
 **The two flat panels are the finding, not filler.** A single commit-rate panel
 cannot distinguish "degraded but safe" from "broken", and a run that commits

@@ -20,7 +20,13 @@ Three panels, in the order the damage propagates:
 
 Sensor error first costs echoes, which costs certificates; only once
 certificates are scarce enough to threaten f+1 does it cost a commit; and only a
-lost commit costs a crossing. Reading them together is what distinguishes
+lost commit costs a crossing.
+
+Panel 1 is points, not a curve. Only replicas that assemble a certificate emit
+Cert_Collection_Duration, so a cell can hold one or two observations rather than
+one per vehicle, and a mean over two very different values is an artefact rather
+than a central tendency -- see docs/ablations.md section 6 for the measured
+samples. Repetitions are what turn it into a curve. Reading them together is what distinguishes
 "degraded but safe" from "broken" — a run that commits nothing is safe and
 useless, and a single commit-rate panel cannot tell you which you are looking
 at.
