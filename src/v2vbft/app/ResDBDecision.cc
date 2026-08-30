@@ -128,6 +128,11 @@ void ResDBIntersectionApp::proposeAll()
     // Missing vehicles → QUIET (cyber_status=0, sim_time_us=UINT64_MAX).
     std::set<int> present_ids;
     std::vector<ResdbVehicleEntry> entries;
+    // Queue position from certified distances rather than from what each car
+    // claimed. This is the point of the distance round: position_in_lane used
+    // to be an unchecked assertion, and a car that overstated it crossed ahead
+    // of one that did not.
+    const auto certifiedRanks = deriveQueueRanks(candidate.certs, candidate.distanceCerts);
     for (const auto& kv : candidate.certs) {
         const int rid = extractReplicaId(kv.first);
         const bool eligible = rollbackOrderEpoch
@@ -164,6 +169,14 @@ void ResDBIntersectionApp::proposeAll()
             e.lane             = laneCode(c.lane);
             e.direction        = directionCode(c.direction);
             e.position_in_lane = static_cast<uint8_t>(std::min(c.positionInLane, 255));
+        }
+        // Certified rank wins over the claimed one wherever it exists. Where it
+        // does not, the claim stands -- dropping the car instead would make a
+        // lost distance frame a liveness failure rather than a loss of
+        // attestation.
+        {
+            auto rankIt = certifiedRanks.find(kv.first);
+            if (rankIt != certifiedRanks.end()) e.position_in_lane = rankIt->second;
         }
         if (e.sim_time_us == 0)
             e.sim_time_us = (uint64_t)simTime().inUnit(SIMTIME_US);

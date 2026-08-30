@@ -1,5 +1,5 @@
 #pragma once
-
+#include <array>
 #include <cstdint>
 #include <string>
 #include <vector>
@@ -80,7 +80,52 @@ struct ArrivalCert {
     // under CATEGORICAL_CARDINAL where an approach has a single lane.
     int32_t                  lateralClaimCm    = 0;
     int                      physicalLaneIndex = -1;
+    // Hash of the arrival claim these echoes were collected against. The
+    // distance round binds its attestation to this, so a distance cert cannot
+    // be transplanted onto a different arrival claim by the same vehicle.
+    std::array<uint8_t, 32>  claimHash{};
     std::vector<ArrivalEcho> echoes;
+};
+
+// ── Stopped-distance certificate (types 18/19/20) ────────────────────────────
+// The second certificate round. An arrival cert says a vehicle is on the
+// approach it claims; it says nothing about how far down the queue it is, and
+// position_in_lane was previously the vehicle's own unchecked assertion. A
+// vehicle that overstates its position crosses ahead of one that does not.
+//
+// So a stopped vehicle attests its distance to the stop line, witnesses gate
+// that against their own noisy observation of the same distance, and f+1
+// signed echoes make it a certificate. Ranks are then derived from certified
+// distances rather than from claims.
+
+// Type 18: the stopped vehicle's own signed distance claim, bound to the
+// arrival claim it continues (earlyClaimHash) so the two cannot be mixed.
+struct StoppedDistanceAttestation {
+    std::string             targetCarId;
+    int                     epoch            = 0;
+    std::array<uint8_t, 32> earlyClaimHash{};
+    int32_t                 distanceToStopCm = 0;
+    std::vector<uint8_t>    signature;
+};
+
+// Type 19: one witness's signed agreement, bound to the exact attestation it
+// saw (attestationHash) so an echo cannot be replayed onto a different claim.
+struct StoppedDistanceEcho {
+    int                     echoingReplicaId = -1;
+    std::string             targetCarId;
+    int                     epoch            = 0;
+    std::array<uint8_t, 32> earlyClaimHash{};
+    std::array<uint8_t, 32> attestationHash{};
+    int32_t                 distanceToStopCm = 0;
+    uint8_t                 signerPubKey[CRYPTO_PUBKEY_BYTES] = {};
+    uint8_t                 signature[CRYPTO_SIG_MAX_BYTES]   = {};
+    uint8_t                 signatureLen = 0;
+};
+
+// Type 20: the attestation plus its f+1 echoes.
+struct StoppedDistanceCert {
+    StoppedDistanceAttestation       attestation;
+    std::vector<StoppedDistanceEcho> echoes;
 };
 
 // ── Discovery round ──────────────────────────────────────────────────────────
@@ -113,6 +158,12 @@ struct DiscoveryRound {
     omnetpp::simtime_t collectionStartedAt = SIMTIME_ZERO;
     LocalCertState localCert = LocalCertState::NOT_ASSEMBLED;
     DiscoveryCloseReason closeReason = DiscoveryCloseReason::NONE;
+    // The distance certificate's own lifecycle, tracked separately from the
+    // arrival one because discovery closes on arrivals first and distances
+    // second. QUEUED vs AIRED matters for the same reason it does for the
+    // arrival cert: a round must not complete while its own certificate is
+    // still sitting in the transmit queue.
+    LocalCertState localDistanceCert = LocalCertState::NOT_ASSEMBLED;
 
     void reset(uint32_t newEpoch, omnetpp::simtime_t now)
     {
@@ -122,6 +173,7 @@ struct DiscoveryRound {
         collectionStartedAt = SIMTIME_ZERO;
         localCert = LocalCertState::NOT_ASSEMBLED;
         closeReason = DiscoveryCloseReason::NONE;
+        localDistanceCert = LocalCertState::NOT_ASSEMBLED;
     }
 
     bool localCertAssembled() const

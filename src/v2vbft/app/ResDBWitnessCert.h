@@ -38,6 +38,10 @@ public:
     bool registerKey(int replicaId, const uint8_t pubKey[CRYPTO_PUBKEY_BYTES]);
     bool matches(int replicaId, const uint8_t pubKey[CRYPTO_PUBKEY_BYTES]) const;
     bool known(int replicaId) const;
+    // Copy out the key bound to a replica. Needed where evidence is verified
+    // against the binding rather than against a key carried in the frame --
+    // a claimant signing its own attestation supplies no key, by design.
+    bool copyKey(int replicaId, uint8_t out[CRYPTO_PUBKEY_BYTES]) const;
 
     // Clears all bindings. Must be called once at the start of each simulation
     // run (the registry is a process-global singleton, but keys are regenerated

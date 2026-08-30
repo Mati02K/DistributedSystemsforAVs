@@ -27,6 +27,9 @@ struct OrderCandidate {
     CancelReason rollbackReason = CANCEL_CRASH;
     int initialPrimary = -1;
     std::map<std::string, ArrivalCert> certs;
+    // Certified stopped distances for the same cars. Ranks come from these, so
+    // a car present in certs but absent here has no attested queue position.
+    std::map<std::string, StoppedDistanceCert> distanceCerts;
     std::map<std::string, VehicleState> vehicleStates;
     std::set<std::string> observedIntents;
     std::vector<uint8_t> cancelJustification;

@@ -113,6 +113,26 @@ ResDBIntersectionApp::deserializeArrivalAnnouncement(BFTMessage* msg)
     return ann;
 }
 
+// SHA-256 over the serialised announcement. This is the identity a distance
+// attestation binds itself to, so the two rounds cannot be mixed: a distance
+// certificate is only valid for the exact arrival claim it continues.
+std::array<uint8_t, 32> ResDBIntersectionApp::arrivalAnnouncementHash(
+    const ArrivalAnnouncement& ann)
+{
+    std::array<uint8_t, 32> out{};
+    const std::vector<uint8_t> bytes = serializeArrivalAnnouncement(ann);
+    unsigned int digestLen = 0;
+    EVP_MD_CTX* mdctx = EVP_MD_CTX_new();
+    if (!mdctx) return out;
+    const bool ok = EVP_DigestInit_ex(mdctx, EVP_sha256(), nullptr) == 1 &&
+        EVP_DigestUpdate(mdctx, bytes.data(), bytes.size()) == 1 &&
+        EVP_DigestFinal_ex(mdctx, out.data(), &digestLen) == 1 &&
+        digestLen == out.size();
+    EVP_MD_CTX_free(mdctx);
+    if (!ok) out.fill(0);
+    return out;
+}
+
 std::vector<uint8_t> ResDBIntersectionApp::serializeArrivalEcho(const ArrivalEcho& echo)
 {
     std::vector<uint8_t> pubVec(echo.signerPubKey, echo.signerPubKey + CRYPTO_PUBKEY_BYTES);
@@ -175,7 +195,8 @@ std::vector<uint8_t> ResDBIntersectionApp::serializeArrivalCert(const ArrivalCer
        << (cert.isAmbulance ? "1" : "0") << "|"
        << cert.epoch          << "|"
        << cert.lateralClaimCm << "|"
-       << cert.physicalLaneIndex;
+       << cert.physicalLaneIndex << "|"
+       << toHex(cert.claimHash.data(), cert.claimHash.size());
     for (const auto& echo : cert.echoes) {
         std::vector<uint8_t> pubVec(echo.signerPubKey, echo.signerPubKey + CRYPTO_PUBKEY_BYTES);
         std::vector<uint8_t> sigVec(echo.signature, echo.signature + echo.signatureLen);
@@ -194,7 +215,7 @@ ResDBIntersectionApp::deserializeArrivalCert(BFTMessage* msg)
     std::string s(payload.begin(), payload.end());
     auto parts = splitStr(s, '|');
     ArrivalCert cert;
-    if (parts.size() < 8) return cert;
+    if (parts.size() < 9) return cert;
     cert.carId          = parts[0];
     cert.lane           = parts[1];
     cert.positionInLane = std::stoi(parts[2]);
@@ -203,7 +224,12 @@ ResDBIntersectionApp::deserializeArrivalCert(BFTMessage* msg)
     cert.epoch             = std::stoi(parts[5]);
     cert.lateralClaimCm    = std::stoi(parts[6]);
     cert.physicalLaneIndex = std::stoi(parts[7]);
-    for (size_t i = 8; i < parts.size(); i++) {
+    {
+        const std::vector<uint8_t> h = fromHex(parts[8]);
+        if (h.size() == cert.claimHash.size())
+            std::copy(h.begin(), h.end(), cert.claimHash.begin());
+    }
+    for (size_t i = 9; i < parts.size(); i++) {
         size_t colon = parts[i].find(':');
         if (colon == std::string::npos) continue;
         ArrivalEcho echo;
@@ -357,6 +383,22 @@ void ResDBIntersectionApp::noteDiscoveryIntent(const std::string& carId, const c
     armDiscoveryTimers("new-intent");
 }
 
+// Arrivals only: every eligible intent has an arrival certificate. This is the
+// first of the two closures -- it says the view is settled, not that it is
+// rankable, which is what the distance round then establishes.
+bool ResDBIntersectionApp::arrivalViewCertified() const
+{
+    bool hasEligibleIntent = false;
+    std::lock_guard<std::mutex> lk(certs_mutex_);
+    for (const auto& carId : observed_intent_cars_) {
+        const int rid = extractReplicaId(carId);
+        if (ctx_.cancel_pending_ && !shouldIncludeInRollbackMembership(rid)) continue;
+        hasEligibleIntent = true;
+        if (!ctx_.collected_certs_.count(carId)) return false;
+    }
+    return hasEligibleIntent;
+}
+
 bool ResDBIntersectionApp::discoveryViewCertified(std::vector<int>* missing) const
 {
     bool hasEligibleIntent = false;
@@ -368,7 +410,12 @@ bool ResDBIntersectionApp::discoveryViewCertified(std::vector<int>* missing) con
         if (ctx_.cancel_pending_ && !shouldIncludeInRollbackMembership(rid)) continue;
         hasEligibleIntent = true;
         if (carId == localCarId) hasLocalIntent = true;
-        if (!ctx_.collected_certs_.count(carId)) {
+        // Both certificates, unconditionally. Gating the distance requirement on
+        // whether the distance round had started made the round unreachable:
+        // at the deadline the view looked fully certified on arrivals alone, so
+        // the opener was skipped and ranks stayed unattested.
+        if (!ctx_.collected_certs_.count(carId) ||
+                !collected_distance_certs_.count(carId)) {
             if (missing) missing->push_back(rid);
             else return false;
         }
@@ -376,11 +423,69 @@ bool ResDBIntersectionApp::discoveryViewCertified(std::vector<int>* missing) con
     return hasEligibleIntent && hasLocalIntent && (!missing || missing->empty());
 }
 
+void ResDBIntersectionApp::beginStoppedDistanceCollection(const char* reason)
+{
+    if (stopped_distance_collection_active_ ||
+            ctx_.discovery_.state != DiscoveryState::COLLECTING) return;
+    stopped_distance_collection_active_ = true;
+
+    // The arrival round is over: stop producing announcements and stop the
+    // stabilisation timer that governed it. Both would otherwise keep reopening
+    // a view that is already settled.
+    if (discovery_settle_msg_ && discovery_settle_msg_->isScheduled())
+        cancelEvent(discovery_settle_msg_);
+    if (broadcastArrivalAnnouncement_timer_) {
+        if (broadcastArrivalAnnouncement_timer_->isScheduled())
+            cancelEvent(broadcastArrivalAnnouncement_timer_);
+        delete broadcastArrivalAnnouncement_timer_;
+        broadcastArrivalAnnouncement_timer_ = nullptr;
+    }
+    stopStopZoneCertGossip();
+
+    // Drop queued arrival traffic but keep distance frames. The queue is a
+    // shared stagger, and leaving stale ANN/ECHO in it spends air time the
+    // distance round needs on a view that has already closed.
+    for (auto it = pending_discovery_txs_.begin(); it != pending_discovery_txs_.end();) {
+        if (it->msgType == kStoppedDistanceAttestationType ||
+                it->msgType == kStoppedDistanceEchoType ||
+                it->msgType == kStoppedDistanceCertType) {
+            ++it;
+        } else {
+            it = pending_discovery_txs_.erase(it);
+        }
+    }
+    if (discovery_tx_flush_timer_ && discovery_tx_flush_timer_->isScheduled())
+        cancelEvent(discovery_tx_flush_timer_);
+    scheduleDiscoveryTxFlush();
+
+    // Re-arm the hard deadline for the second round. Without this the distance
+    // round inherits an already-expired deadline and closes immediately.
+    if (discovery_deadline_msg_ && discovery_deadline_msg_->isScheduled())
+        cancelEvent(discovery_deadline_msg_);
+    scheduleAt(simTime() + cert_collection_timeout_, discovery_deadline_msg_);
+
+    std::cout << "[DISTANCE-COLLECTION-BEGIN] r" << ctx_.replicaId_
+              << " epoch=" << ctx_.discovery_.epoch
+              << " reason=" << (reason ? reason : "early-deadline")
+              << " deadline=" << simTime() + cert_collection_timeout_
+              << " earlyCerts=" << ctx_.collected_certs_.size()
+              << " distanceCerts=" << collected_distance_certs_.size() << "\n";
+}
+
 void ResDBIntersectionApp::maybeAdvanceDiscovery(const char* reason, bool deadline)
 {
     if (ctx_.discovery_.state != DiscoveryState::COLLECTING || !entered_stop_zone_ ||
             ctx_.propose_submitted_ || ctx_.order_applied_) return;
     if (deadline) {
+        // Two closures, not one. If the arrival view is settled but distances
+        // are not yet certified, the deadline opens the distance round rather
+        // than draining: ranks derived from claims are exactly what this round
+        // exists to replace, so closing here would discard the point of it.
+        if (!stopped_distance_collection_active_ && arrivalViewCertified() &&
+                !discoveryViewCertified()) {
+            beginStoppedDistanceCollection(reason);
+            return;
+        }
         beginDiscoveryDrain(reason, true);
         return;
     }
@@ -623,6 +728,13 @@ void ResDBIntersectionApp::broadcastArrivalAnnouncement(bool forceEmergency)
             ann.signature.assign(sigOut, sigOut + sigLen);
     }
 
+    // Remember our own claim's identity. Computed here, after the signature is
+    // attached, because a receiver hashes the announcement it deserialised --
+    // hashing before signing gives the sender a different digest to everyone
+    // else and every attestation it later sends is parked as unmatchable.
+    local_claim_hashes_["veh" + std::to_string(ctx_.replicaId_)] =
+        arrivalAnnouncementHash(ann);
+
     // Self-store.
     {
         VehicleState selfVS;
@@ -806,6 +918,7 @@ void ResDBIntersectionApp::handleArrivalAnnouncement(BFTMessage* msg,
         //                is within physicalGateK sigmas of what was observed,
         //                and the discrete lane index the vehicle claims is the
         //                one its own lateral claim projects to
+        local_claim_hashes_[ann.carId] = arrivalAnnouncementHash(ann);
         const std::string sampleKey = arrivalClaimKey(ann);
         auto sampleIt = arrival_perception_samples_.find(sampleKey);
         ArrivalPerceptionSample sample;
@@ -1144,6 +1257,10 @@ void ResDBIntersectionApp::collectArrivalEcho(const ArrivalEcho& echo, const cha
         cert.lateralClaimCm    = perception_->ownLateralClaimCm(simTime());
         cert.physicalLaneIndex = perception_->projectPhysicalLaneIndex(cert.lateralClaimCm);
     }
+    {
+        auto hIt = local_claim_hashes_.find(myCarId);
+        if (hIt != local_claim_hashes_.end()) cert.claimHash = hIt->second;
+    }
     cert.echoes = echoes;
     if (state.arrival_time_us > 0) {
         const double announceTimeSec = static_cast<double>(state.arrival_time_us) / 1000000.0;
@@ -1401,6 +1518,12 @@ void ResDBIntersectionApp::handleArrivalCert(BFTMessage* msg)
     const bool emergencyCancelStarted = maybeTriggerEmergencyRollbackFromCert(cert);
 
     (void)emergencyCancelStarted;
+    // A distance attestation for this car may have arrived before its arrival
+    // cert did -- the two race over a lossy radio. Learning the claim hash here
+    // is what makes those parked attestations checkable, so replay them now
+    // rather than losing a witness for good.
+    local_claim_hashes_[cert.carId] = cert.claimHash;
+    processPendingStoppedDistanceAttestation(cert.carId);
     maybeAdvanceDiscovery("cert-stored");
 }
 

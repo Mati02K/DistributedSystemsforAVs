@@ -229,5 +229,21 @@ simple ResDBIntersectionApp extends DemoBaseApplLayer
         // does not shift the draws that decide anything else.
         int    perceptionRngIndex                          = default(1);
 
+        // ── Stopped-distance certificate round ────────────────────────────────
+        // Speed below which a vehicle counts as stopped and may attest its
+        // distance. Not zero: SUMO leaves a stopped vehicle with a small
+        // residual velocity, and requiring exact zero never fires.
+        double distanceStationarySpeedMps @unit(mps)       = default(0.1mps);
+        // The attestation is a single broadcast on a lossy channel; a witness
+        // that misses it cannot echo, and a vehicle short of f+1 echoes is
+        // dropped from the proposal entirely. Bounded retries, not ACKs.
+        double stoppedDistanceAttestationRetryIntervalSec @unit(s) = default(0.5s);
+        int    stoppedDistanceAttestationRetryMax          = default(4);
+        // After f+1 echoes arrive, keep collecting for this long before
+        // finalising. The threshold is the earliest a certificate *can* form,
+        // not the point at which every witness has been heard; closing on the
+        // f+1'th echo throws away corroboration that is already in flight.
+        double directionEligibilityCollectionWindowSec @unit(s) = default(0.25s);
+
         @display("i=block/app2");
 }

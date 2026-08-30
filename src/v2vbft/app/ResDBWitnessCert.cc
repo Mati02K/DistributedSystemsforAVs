@@ -42,6 +42,15 @@ bool WitnessKeyRegistry::known(int replicaId) const
     return keys_.count(replicaId) != 0;
 }
 
+bool WitnessKeyRegistry::copyKey(int replicaId, uint8_t out[CRYPTO_PUBKEY_BYTES]) const
+{
+    std::lock_guard<std::mutex> lock(mtx_);
+    auto it = keys_.find(replicaId);
+    if (it == keys_.end()) return false;
+    std::memcpy(out, it->second.data(), CRYPTO_PUBKEY_BYTES);
+    return true;
+}
+
 void WitnessKeyRegistry::resetForNewRun()
 {
     std::lock_guard<std::mutex> lk(mtx_);

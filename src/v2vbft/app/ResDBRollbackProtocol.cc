@@ -2146,6 +2146,10 @@ ResDBIntersectionApp::buildOrderCandidate() const
     {
         std::lock_guard<std::mutex> lk(certs_mutex_);
         candidate->certs = ctx_.collected_certs_;
+        // Snapshot the distance certs alongside the arrival ones, under the
+        // same lock, so the ranks derived from them describe the same instant
+        // as the membership they rank.
+        candidate->distanceCerts = collected_distance_certs_;
         candidate->vehicleStates = local_vehicle_states_;
         candidate->observedIntents = observed_intent_cars_;
     }

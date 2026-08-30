@@ -92,6 +92,8 @@ protected:
     void onConsensusTimeout(cMessage* msg);
     void onResume(cMessage* msg);
     void onPrecedingBatchPoll(cMessage* msg);
+    void onStoppedDistanceFinalize(cMessage* msg);
+    void onStoppedDistanceRetry(cMessage* msg);
 
     void handlePositionUpdate(cObject* obj) override;
     void finish() override;
@@ -250,6 +252,8 @@ private:
     void startDiscoveryRound(const char* reason);
     void armDiscoveryTimers(const char* reason);
     void noteDiscoveryIntent(const std::string& carId, const char* source);
+    std::array<uint8_t, 32> arrivalAnnouncementHash(const ArrivalAnnouncement& ann);
+    bool arrivalViewCertified() const;
     bool discoveryViewCertified(std::vector<int>* missing = nullptr) const;
     void maybeAdvanceDiscovery(const char* reason, bool deadline = false);
     void beginDiscoveryDrain(const char* reason, bool deadline);
@@ -507,6 +511,43 @@ private:
     VerificationResult verifyCarPosition(const std::string& carId,
                                          const std::string& claimedLane,
                                          double claimedPosition, double tolerance);
+
+    // ── Stopped-distance certificate round (types 18/19/20) ──────────────────
+    // Implemented in ResDBDistanceProtocol.cc. Turns position_in_lane from the
+    // vehicle's own assertion into something f+1 witnesses have agreed to.
+    void beginStoppedDistanceCollection(const char* reason);
+    void maybeBroadcastStoppedDistanceAttestation();
+    void retryStoppedDistanceAttestation();
+    void scheduleStoppedDistanceAttestationRetry();
+    void cancelStoppedDistanceAttestationRetry();
+    void handleStoppedDistanceAttestation(BFTMessage* msg);
+    void handleStoppedDistanceEcho(BFTMessage* msg);
+    void handleStoppedDistanceCert(BFTMessage* msg);
+    void processPendingStoppedDistanceAttestation(const std::string& carId);
+    void collectStoppedDistanceEcho(const StoppedDistanceEcho& echo);
+    bool finalizeLocalStoppedDistanceCert(const char* reason);
+    void cancelStoppedDistanceFinalizeTimer();
+    bool validateStoppedDistanceAttestation(const StoppedDistanceAttestation& att) const;
+    bool validateStoppedDistanceCert(const StoppedDistanceCert& cert) const;
+    std::string canonicalStoppedDistanceAttestationPayload(
+        const StoppedDistanceAttestation& att) const;
+    std::string stoppedDistanceEchoSigningPayload(const StoppedDistanceEcho& echo) const;
+    std::array<uint8_t, 32> stoppedDistanceAttestationHash(
+        const StoppedDistanceAttestation& att) const;
+    std::vector<uint8_t> serializeStoppedDistanceAttestation(
+        const StoppedDistanceAttestation& att) const;
+    StoppedDistanceAttestation deserializeStoppedDistanceAttestation(BFTMessage* msg) const;
+    std::vector<uint8_t> serializeStoppedDistanceEcho(const StoppedDistanceEcho& echo) const;
+    StoppedDistanceEcho deserializeStoppedDistanceEcho(BFTMessage* msg) const;
+    std::vector<uint8_t> serializeStoppedDistanceCert(const StoppedDistanceCert& cert) const;
+    StoppedDistanceCert deserializeStoppedDistanceCert(BFTMessage* msg) const;
+    // Certified distances -> 1-based position_in_lane, grouped by lane. The
+    // payoff of the whole round: the scheduler is unchanged, but the ranks it
+    // consumes are now attested rather than claimed.
+    std::map<std::string, uint8_t> deriveQueueRanks(
+        const std::map<std::string, ArrivalCert>& arrivals,
+        const std::map<std::string, StoppedDistanceCert>& distances) const;
+
     int    extractReplicaId(const std::string& carId) const;
 
     // ── State ─────────────────────────────────────────────────────────────────
@@ -527,6 +568,30 @@ private:
     // Caching the sample makes a witness's verdict a function of the claim, not
     // of how many times it was heard.
     std::map<std::string, ArrivalPerceptionSample> arrival_perception_samples_;
+
+    // ── Stopped-distance round state ─────────────────────────────────────────
+    cMessage* stopped_distance_finalize_timer_          = nullptr;
+    cMessage* stopped_distance_attestation_retry_timer_ = nullptr;
+
+    std::map<std::string, StoppedDistanceCert>            collected_distance_certs_;
+    std::vector<StoppedDistanceEcho>                      my_received_distance_echoes_;
+    std::map<std::string, StoppedDistancePerceptionSample> stopped_distance_samples_;
+    // Attestations heard before this witness knew the target's arrival claim.
+    // Parked rather than dropped: the two arrive over a lossy radio in no
+    // guaranteed order, and discarding the early one loses a witness for good.
+    std::map<std::string, StoppedDistanceAttestation>      pending_distance_attestations_;
+    StoppedDistanceAttestation local_distance_attestation_;
+    bool stopped_distance_attestation_sent_    = false;
+    bool stopped_distance_cert_broadcast_      = false;
+    int  stopped_distance_attestation_retry_count_ = 0;
+    bool stopped_distance_collection_active_   = false;
+    double distance_stationary_speed_mps_      = 0.1;
+    double stopped_distance_retry_interval_sec_ = 0.5;
+    int    stopped_distance_retry_max_          = 4;
+    double direction_eligibility_collection_window_sec_ = 0.25;
+    // Hash of this vehicle's own arrival claim, binding its distance
+    // attestation to the arrival it continues.
+    std::map<std::string, std::array<uint8_t, 32>> local_claim_hashes_;
 
     cMessage* smoke_test_msg_          = nullptr;
     cMessage* transport_poll_msg_      = nullptr;
@@ -694,6 +759,12 @@ private:
     static constexpr int kClearEchoType = 15;
     static constexpr int kClearCertType = 16;
     static constexpr int kWaitHeartbeatType = 17;
+    // The stopped-distance round. Separate types rather than a sub-field of the
+    // arrival types, so a replica can drain one round while the other is still
+    // collecting -- discovery closes on arrivals first, then on distances.
+    static constexpr int kStoppedDistanceAttestationType = 18;
+    static constexpr int kStoppedDistanceEchoType        = 19;
+    static constexpr int kStoppedDistanceCertType        = 20;
 
     resdb_gossip::GossipAccumulator  gossip_acc_;
     resdb_gossip::CertRelayTracker   cert_relay_tracker_;

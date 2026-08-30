@@ -108,6 +108,8 @@ ResDBIntersectionApp::~ResDBIntersectionApp()
     deleteTimer(resume_msg_);
     deleteTimer(cancel_cert_retry_timer_);
     deleteTimer(clear_cert_retry_timer_);
+    deleteTimer(stopped_distance_finalize_timer_);
+    deleteTimer(stopped_distance_attestation_retry_timer_);
     deleteTimer(clear_cert_candidate_timer_);
     deleteTimer(clear_cert_relay_timer_);
     deleteTimer(wait_leader_send_timer_);
@@ -249,6 +251,12 @@ void ResDBIntersectionApp::initialize(int stage)
         byzantine_pbft_silent_   = par("byzantinePbftSilent").boolValue();
         enableAmbulanceCertGate_ = par("enableAmbulanceCertGate").boolValue();
         enable_arrival_position_gate_ = par("enableArrivalPositionGate").boolValue();
+        distance_stationary_speed_mps_ = par("distanceStationarySpeedMps").doubleValue();
+        stopped_distance_retry_interval_sec_ =
+            par("stoppedDistanceAttestationRetryIntervalSec").doubleValue();
+        stopped_distance_retry_max_ = par("stoppedDistanceAttestationRetryMax").intValue();
+        direction_eligibility_collection_window_sec_ =
+            par("directionEligibilityCollectionWindowSec").doubleValue();
         for (const auto& token : splitStr(par("falseLaneColluderIds").stdstringValue(), ',')) {
             if (token.empty()) continue;
             try {
@@ -466,6 +474,12 @@ void ResDBIntersectionApp::initialize(int stage)
         discovery_settle_msg_ = new cMessage("resdbDiscoverySettle");
         consensus_retry_timer_ = new cMessage("resdbConsensusRetry");
         consensus_relay_timer_ = new cMessage("resdbConsensusRelay");
+        // The distance round's two timers. Every scheduling site is null-guarded,
+        // so a missing allocation does not crash -- it silently never fires, and
+        // the certificate simply never forms.
+        stopped_distance_finalize_timer_ = new cMessage("resdbStoppedDistanceFinalize");
+        stopped_distance_attestation_retry_timer_ =
+            new cMessage("resdbStoppedDistanceRetry");
     }
 
     if (stage == 1) {
@@ -598,6 +612,8 @@ bool ResDBIntersectionApp::dispatchTimer(cMessage* msg)
         {&ResDBIntersectionApp::clear_cert_relay_timer_, &ResDBIntersectionApp::onClearCertRelay},
         {&ResDBIntersectionApp::wait_leader_send_timer_, &ResDBIntersectionApp::onWaitLeaderSend},
         {&ResDBIntersectionApp::wait_follower_expiry_timer_, &ResDBIntersectionApp::onWaitFollowerExpiry},
+        {&ResDBIntersectionApp::stopped_distance_finalize_timer_, &ResDBIntersectionApp::onStoppedDistanceFinalize},
+        {&ResDBIntersectionApp::stopped_distance_attestation_retry_timer_, &ResDBIntersectionApp::onStoppedDistanceRetry},
         {&ResDBIntersectionApp::discovery_deadline_msg_, &ResDBIntersectionApp::onDiscoveryDeadline},
         {&ResDBIntersectionApp::discovery_settle_msg_, &ResDBIntersectionApp::onDiscoverySettle},
         {&ResDBIntersectionApp::vc_trigger_msg_, &ResDBIntersectionApp::onVcTrigger},
@@ -1357,6 +1373,11 @@ void ResDBIntersectionApp::handlePositionUpdate(cObject* obj)
     double dist = getDistanceToIntersection();
     if (dist >= stop_distance_ || dist <= 0) return;
 
+    // A stopped vehicle attests its distance to the stop line every position
+    // update, so a witness that missed the first one still has chances while
+    // the vehicle waits.
+    if (entered_stop_zone_) maybeBroadcastStoppedDistanceAttestation();
+
     if (!entered_stop_zone_) {
         entered_stop_zone_ = true;
         stop_time_ = simTime();
@@ -1641,6 +1662,20 @@ void ResDBIntersectionApp::onWSM(BaseFrame1609_4* wsm)
 
     if (msgType == kWaitHeartbeatType) {
         handleWaitHeartbeat(bft);
+        return;
+    }
+
+    // ── Types 18/19/20: the stopped-distance certificate round ────────────────
+    if (msgType == kStoppedDistanceAttestationType) {
+        handleStoppedDistanceAttestation(bft);
+        return;
+    }
+    if (msgType == kStoppedDistanceEchoType) {
+        handleStoppedDistanceEcho(bft);
+        return;
+    }
+    if (msgType == kStoppedDistanceCertType) {
+        handleStoppedDistanceCert(bft);
         return;
     }
 
