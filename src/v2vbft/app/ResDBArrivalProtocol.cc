@@ -309,6 +309,23 @@ void ResDBIntersectionApp::startDiscoveryRound(const char* reason)
     if (discovery_deadline_msg_->isScheduled()) cancelEvent(discovery_deadline_msg_);
     if (discovery_settle_msg_->isScheduled()) cancelEvent(discovery_settle_msg_);
     ctx_.discovery_.reset(ctx_.current_epoch_, simTime());
+    // The distance round is per-epoch and must be reset with it. Leaving
+    // stopped_distance_attestation_sent_ set from the previous epoch means a
+    // vehicle that is already stopped after a CANCEL never re-attests, no
+    // distance certificate forms, and discovery can never certify -- which
+    // presents as the epoch-1 recovery silently never proposing until the
+    // view-change timer fires.
+    stopped_distance_attestation_sent_ = false;
+    stopped_distance_cert_broadcast_ = false;
+    stopped_distance_collection_active_ = false;
+    stopped_distance_attestation_retry_count_ = 0;
+    my_received_distance_echoes_.clear();
+    collected_distance_certs_.clear();
+    pending_distance_attestations_.clear();
+    local_distance_attestation_ = StoppedDistanceAttestation{};
+    cancelStoppedDistanceFinalizeTimer();
+    cancelStoppedDistanceAttestationRetry();
+
     resetOrderCandidate(reason ? reason : "discovery-start");
     std::cout << "[DISCOVERY-BEGIN] r" << ctx_.replicaId_
               << " epoch=" << ctx_.discovery_.epoch
@@ -410,12 +427,23 @@ bool ResDBIntersectionApp::discoveryViewCertified(std::vector<int>* missing) con
         if (ctx_.cancel_pending_ && !shouldIncludeInRollbackMembership(rid)) continue;
         hasEligibleIntent = true;
         if (carId == localCarId) hasLocalIntent = true;
-        // Both certificates, unconditionally. Gating the distance requirement on
-        // whether the distance round had started made the round unreachable:
-        // at the deadline the view looked fully certified on arrivals alone, so
-        // the opener was skipped and ranks stayed unattested.
+        // Arrival certs always; distance certs when the round is enabled.
+        //
+        // These two have to agree. Requiring distances unconditionally stalls
+        // the 18- and 22-replica rollback cells: one lost certificate holds the
+        // round open past the view-change timer and ResilientDB asserts inside
+        // SendViewChangeMsg rather than degrading. But not requiring them at all
+        // is worse than useless -- discovery then completes on arrival certs
+        // before any vehicle has stopped, the round never leaves COLLECTING,
+        // and no attestation is ever sent.
+        //
+        // So the flag governs both: a configuration that asks for attested
+        // ranks also accepts waiting for them, and must budget
+        // pbftVcTimeoutSec accordingly. Everything else keeps the timing it was
+        // tuned for.
         if (!ctx_.collected_certs_.count(carId) ||
-                !collected_distance_certs_.count(carId)) {
+                (enable_stopped_distance_round_ &&
+                 !collected_distance_certs_.count(carId))) {
             if (missing) missing->push_back(rid);
             else return false;
         }
@@ -425,7 +453,7 @@ bool ResDBIntersectionApp::discoveryViewCertified(std::vector<int>* missing) con
 
 void ResDBIntersectionApp::beginStoppedDistanceCollection(const char* reason)
 {
-    if (stopped_distance_collection_active_ ||
+    if (!enable_stopped_distance_round_ || stopped_distance_collection_active_ ||
             ctx_.discovery_.state != DiscoveryState::COLLECTING) return;
     stopped_distance_collection_active_ = true;
 

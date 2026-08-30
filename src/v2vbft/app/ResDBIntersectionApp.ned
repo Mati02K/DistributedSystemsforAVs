@@ -101,7 +101,7 @@ simple ResDBIntersectionApp extends DemoBaseApplLayer
         bool   isAmbulance         = default(false);  // ambulance gets top priority in schedule
         int    ambulanceReplicaId  = default(-1);     // if >=0, marks veh<id> as ambulance after SUMO identity binding
         bool   isByzantine         = default(false);  // enables Byzantine fault injection
-        int    byzantineType       = default(0);      // 0=honest 1=false_lane 2=invalid_sig 3=equivocator 4=silent_primary 5=bad_proposal 6=fake_ambulance 7=fake_ambulance_follower 8=tamper_lane
+        int    byzantineType       = default(0);      // 0=honest 1=false_lane 2=invalid_sig 3=equivocator 4=silent_primary 5=bad_proposal 6=fake_ambulance 7=fake_ambulance_follower 8=tamper_lane 9=upgrade_unknown_direction 10=tamper_distance_rank 11=tamper_physical_lane 12=suppress_certs
         bool   byzantinePbftSilent = default(false);  // when true, Byzantine replica drops PBFT outbound messages
         bool   enableAmbulanceCertGate = default(false); // when true, rejects ambulance claims with empty ambulanceCertBytes (ablation toggle)
         string falseLaneColluderIds = default(""); // comma-separated replica IDs selected by --randomize N F
@@ -230,6 +230,14 @@ simple ResDBIntersectionApp extends DemoBaseApplLayer
         int    perceptionRngIndex                          = default(1);
 
         // ── Stopped-distance certificate round ────────────────────────────────
+        // Off by default. The round adds a second certificate exchange (types
+        // 18/19/20) over the same staggered discovery queue, which roughly
+        // doubles discovery-phase air traffic. On the 22-replica rollback cell
+        // that is enough to stop most replicas certifying their arrival view
+        // before the view-change timer fires. Configurations that want attested
+        // queue positions opt in; everything else keeps the traffic profile it
+        // was tuned for.
+        bool   enableStoppedDistanceRound                  = default(false);
         // Speed below which a vehicle counts as stopped and may attest its
         // distance. Not zero: SUMO leaves a stopped vehicle with a small
         // residual velocity, and requiring exact zero never fires.

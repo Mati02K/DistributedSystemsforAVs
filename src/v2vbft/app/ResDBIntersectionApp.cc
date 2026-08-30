@@ -251,6 +251,7 @@ void ResDBIntersectionApp::initialize(int stage)
         byzantine_pbft_silent_   = par("byzantinePbftSilent").boolValue();
         enableAmbulanceCertGate_ = par("enableAmbulanceCertGate").boolValue();
         enable_arrival_position_gate_ = par("enableArrivalPositionGate").boolValue();
+        enable_stopped_distance_round_ = par("enableStoppedDistanceRound").boolValue();
         distance_stationary_speed_mps_ = par("distanceStationarySpeedMps").doubleValue();
         stopped_distance_retry_interval_sec_ =
             par("stoppedDistanceAttestationRetryIntervalSec").doubleValue();
@@ -524,6 +525,7 @@ void ResDBIntersectionApp::initialize(int stage)
                       << " lon_sigma=" << par("longitudinalObservationSigmaM").doubleValue()
                       << " gate_k=" << par("physicalGateK").doubleValue()
                       << " rng=" << par("perceptionRngIndex").intValue()
+                      << " distance_round=" << (enable_stopped_distance_round_ ? 1 : 0)
                       << "\n";
         }
         startDiscoveryRound("initial-approach");

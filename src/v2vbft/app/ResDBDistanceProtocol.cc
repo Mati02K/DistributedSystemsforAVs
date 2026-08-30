@@ -250,6 +250,7 @@ ResDBIntersectionApp::deserializeStoppedDistanceCert(BFTMessage* msg) const
 
 void ResDBIntersectionApp::maybeBroadcastStoppedDistanceAttestation()
 {
+    if (!enable_stopped_distance_round_) return;
     if (stopped_distance_attestation_sent_ || !entered_stop_zone_ ||
             ctx_.discovery_.state != DiscoveryState::COLLECTING || ctx_.propose_submitted_ ||
             ctx_.order_applied_ || crashCommsDisabled_ || !ctx_.ec_private_key_) return;
@@ -352,6 +353,7 @@ void ResDBIntersectionApp::retryStoppedDistanceAttestation()
 
 void ResDBIntersectionApp::handleStoppedDistanceAttestation(BFTMessage* msg)
 {
+    if (!enable_stopped_distance_round_) return;
     const StoppedDistanceAttestation att = deserializeStoppedDistanceAttestation(msg);
     if (!validateStoppedDistanceAttestation(att) || ctx_.propose_submitted_ || ctx_.order_applied_ ||
             ctx_.current_phase_ == ConsensusPhase::DEPARTED) return;
@@ -479,6 +481,7 @@ void ResDBIntersectionApp::collectStoppedDistanceEcho(const StoppedDistanceEcho&
 
 void ResDBIntersectionApp::handleStoppedDistanceEcho(BFTMessage* msg)
 {
+    if (!enable_stopped_distance_round_) return;
     collectStoppedDistanceEcho(deserializeStoppedDistanceEcho(msg));
 }
 
@@ -570,6 +573,7 @@ bool ResDBIntersectionApp::validateStoppedDistanceCert(const StoppedDistanceCert
 
 void ResDBIntersectionApp::handleStoppedDistanceCert(BFTMessage* msg)
 {
+    if (!enable_stopped_distance_round_) return;
     const StoppedDistanceCert cert = deserializeStoppedDistanceCert(msg);
     if (!validateStoppedDistanceCert(cert)) return;
     const std::string& carId = cert.attestation.targetCarId;

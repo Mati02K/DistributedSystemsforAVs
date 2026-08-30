@@ -351,6 +351,14 @@ void ResDBIntersectionApp::proposeAll()
     if (is_byzantine_ && byzantine_type_ == BYZANTINE_BAD_PROPOSAL)   applyByzantineBadProposal(hdr, buf);
     if (is_byzantine_ && byzantine_type_ == BYZANTINE_FAKE_AMBULANCE)  applyByzantineFakeAmbulance(buf.data() + sizeof(ResdbProposeHdr), n);
     if (is_byzantine_ && byzantine_type_ == BYZANTINE_TAMPER_LANE)     applyByzantineTamperLane(buf.data() + sizeof(ResdbProposeHdr), n);
+    if (is_byzantine_ && byzantine_type_ == BYZANTINE_UPGRADE_UNKNOWN_DIRECTION)
+        applyByzantineUpgradeUnknownDirection(buf.data() + sizeof(ResdbProposeHdr), n);
+    if (is_byzantine_ && byzantine_type_ == BYZANTINE_TAMPER_DISTANCE_RANK)
+        applyByzantineTamperDistanceRank(buf.data() + sizeof(ResdbProposeHdr), n);
+    if (is_byzantine_ && byzantine_type_ == BYZANTINE_TAMPER_PHYSICAL_LANE)
+        applyByzantineTamperPhysicalLane(buf.data() + sizeof(ResdbProposeHdr), n);
+    if (is_byzantine_ && byzantine_type_ == BYZANTINE_SUPPRESS_CERTS)
+        applyByzantineSuppressCerts(buf.data() + sizeof(ResdbProposeHdr), n);
 
     int rc = ResdbOmnetTriggerConsensus(ctx_.resdb_server_handle_, buf.data(), (uint32_t)buf.size());
     if (rollbackOrderEpoch) {
@@ -580,6 +588,85 @@ void ResDBIntersectionApp::detectConsensusAttackOutcome(
     case BYZANTINE_HONEST:
         break;
     }
+}
+
+// ── Perception-field fault injection (types 9-12) ─────────────────────────────
+// Each of these rewrites a proposal field the leader does not own: the value was
+// established by f+1 signed witnesses, and the leader is only meant to restate
+// it. They exist to demonstrate that pre-verify catches exactly that, so each
+// should be rejected by a cert-backed check rather than a structural one.
+
+void ResDBIntersectionApp::applyByzantineUpgradeUnknownDirection(uint8_t* base, uint32_t n)
+{
+    // An UNKNOWN direction is what the protocol produces when f+1 witnesses did
+    // not agree on the turn cue, and it costs the car a singleton batch.
+    // Rewriting it as STRAIGHT buys parallelism the evidence does not support.
+    for (uint32_t i = 0; i < n; ++i) {
+        auto* e = reinterpret_cast<ResdbVehicleEntry*>(base + i * sizeof(ResdbVehicleEntry));
+        if (e->cyber_status == 1 && e->direction == 3) {
+            e->direction = 0;
+            std::cout << "[BYZANTINE] r" << ctx_.replicaId_
+                      << " UPGRADE_UNKNOWN_DIRECTION: rid=" << e->replica_id
+                      << " dir=3->0 at " << simTime() << "\n";
+            return;
+        }
+    }
+}
+
+void ResDBIntersectionApp::applyByzantineTamperDistanceRank(uint8_t* base, uint32_t n)
+{
+    // Queue rank now comes from certified distances. Promoting a car to the
+    // front of its lane is the attack the distance round exists to stop.
+    for (uint32_t i = 0; i < n; ++i) {
+        auto* e = reinterpret_cast<ResdbVehicleEntry*>(base + i * sizeof(ResdbVehicleEntry));
+        if (e->cyber_status == 1 && e->position_in_lane > 1) {
+            const uint8_t was = e->position_in_lane;
+            e->position_in_lane = 1;
+            std::cout << "[BYZANTINE] r" << ctx_.replicaId_
+                      << " TAMPER_DISTANCE_RANK: rid=" << e->replica_id
+                      << " pos=" << (int)was << "->1 at " << simTime() << "\n";
+            return;
+        }
+    }
+}
+
+void ResDBIntersectionApp::applyByzantineTamperPhysicalLane(uint8_t* base, uint32_t n)
+{
+    // Move a car to the other physical lane of its approach. Under
+    // ADJACENT_LATERAL this changes which turns it is authorised to make.
+    for (uint32_t i = 0; i < n; ++i) {
+        auto* e = reinterpret_cast<ResdbVehicleEntry*>(base + i * sizeof(ResdbVehicleEntry));
+        if (e->cyber_status == 1 && e->physical_lane_index != 0xFF) {
+            const uint8_t was = e->physical_lane_index;
+            e->physical_lane_index = was == 0 ? 1 : 0;
+            e->lateral_claim_cm = -e->lateral_claim_cm;
+            std::cout << "[BYZANTINE] r" << ctx_.replicaId_
+                      << " TAMPER_PHYSICAL_LANE: rid=" << e->replica_id
+                      << " plane=" << (int)was << "->" << (int)e->physical_lane_index
+                      << " at " << simTime() << "\n";
+            return;
+        }
+    }
+}
+
+void ResDBIntersectionApp::applyByzantineSuppressCerts(uint8_t* base, uint32_t n)
+{
+    // Hide cars by marking them QUIET. Check 9 tolerates up to f omissions as
+    // plausible channel loss, so suppressing f+1 is what makes it a detectable
+    // attack rather than indistinguishable from a lossy radio.
+    const int f = ctx_.tolerated_faults_ >= 0 ? ctx_.tolerated_faults_
+                                              : (ctx_.total_vehicles_ - 1) / 3;
+    int suppressed = 0;
+    for (uint32_t i = 0; i < n && suppressed < f + 1; ++i) {
+        auto* e = reinterpret_cast<ResdbVehicleEntry*>(base + i * sizeof(ResdbVehicleEntry));
+        if (e->cyber_status != 1 || e->replica_id == ctx_.replicaId_) continue;
+        e->cyber_status = 0;
+        e->sim_time_us = UINT64_MAX;
+        ++suppressed;
+    }
+    std::cout << "[BYZANTINE] r" << ctx_.replicaId_
+              << " SUPPRESS_CERTS: marked " << suppressed
+              << " certified entries QUIET (f=" << f << ") at " << simTime() << "\n";
 }
 
 // ── Byzantine primary fault injection helpers ─────────────────────────────────

@@ -464,6 +464,10 @@ private:
     void applyByzantineBadProposal(ResdbProposeHdr& hdr, std::vector<uint8_t>& buf);
     void applyByzantineFakeAmbulance(uint8_t* base, uint32_t n);
     void applyByzantineTamperLane(uint8_t* base, uint32_t n);
+    void applyByzantineUpgradeUnknownDirection(uint8_t* base, uint32_t n);
+    void applyByzantineTamperDistanceRank(uint8_t* base, uint32_t n);
+    void applyByzantineTamperPhysicalLane(uint8_t* base, uint32_t n);
+    void applyByzantineSuppressCerts(uint8_t* base, uint32_t n);
     int countStaticCollectedCerts() const;
     int CertPrimary() const;
     // Tolerated Byzantine faults f. Explicit toleratedFaults par wins; otherwise
@@ -585,6 +589,7 @@ private:
     bool stopped_distance_cert_broadcast_      = false;
     int  stopped_distance_attestation_retry_count_ = 0;
     bool stopped_distance_collection_active_   = false;
+    bool enable_stopped_distance_round_        = false;
     double distance_stationary_speed_mps_      = 0.1;
     double stopped_distance_retry_interval_sec_ = 0.5;
     int    stopped_distance_retry_max_          = 4;
