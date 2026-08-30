@@ -223,7 +223,7 @@ The `veins_launchd` log should show it spawning your SUMO, which confirms the
 whole chain (SUMO → TraCI → Veins → the protocol → ResilientDB PBFT):
 
 ```text
-Starting SUMO (/Users/you/sumo-1_20_0/bin/sumo -c bft_4veh.sumo.cfg) on port ...
+Starting SUMO ($HOME/sumo-1_20_0/bin/sumo -c bft_4veh.sumo.cfg) on port ...
 ```
 
 For a deeper check across repetitions, use the structural harness described in

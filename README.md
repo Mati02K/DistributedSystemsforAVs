@@ -97,3 +97,7 @@ The 18-vehicle rollback cells take ~7 minutes per run, so a full matrix is
 roughly 55 minutes. Never run a simulation concurrently with the harness unless
 `LOG_FILE` is set per run.
 
+## Contributions and contact
+
+ymalegao@ucsc.edu · mthiruma@ucsc.edu
+

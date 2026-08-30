@@ -1,6 +1,6 @@
 # Raft vs BFT timing — answered from `partnersv2v`
 
-Source code: **`/home/yash/partnersv2v`** (OMNeT++/Veins). Full detail with line-level references: **`/home/yash/partnersv2v/raft_timing_semantics_report.md`**.
+Source code: **`<partner-repo>`** (OMNeT++/Veins). Full detail with line-level references: **`<partner-repo>/raft_timing_semantics_report.md`**.
 
 BFT reference window you cited: **physical stop → 15 m past the intersection**. Raft JSON uses `timestamps_ms.stopped` / `passed` (implementation: `timeStopped_`, `timePassed_`).
 

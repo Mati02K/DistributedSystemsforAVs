@@ -1,6 +1,6 @@
 # Project Handoff: `v2v` (Distributed Systems for AVs)
 
-This is the handoff for the overall repository at `/Users/yashmalegaonkar/Documents/v2v`.
+This is the handoff for the overall repository at `<repo>`.
 It is written so a new agent can start being useful quickly: what the project is,
 what is actually runnable today, where the important code lives, and what to do next.
 

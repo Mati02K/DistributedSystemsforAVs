@@ -224,7 +224,7 @@ If any of these are omitted, you may get behavior drift versus current benchmark
 
 build command I used:
 
-yash@DESKTOP-N69GVSJ:~/DistributedSystemsforAVs/incubator-resilientdb$ bazel build   //service/utils:server_factory   //executor/kv:kv_executor   //chain/state:chain_state   //chain/storage:memory_db   --copt=-fPIC   --linkopt=-fPIC   --force_pic
+user@host:~/<repo>/incubator-resilientdb$ bazel build   //service/utils:server_factory   //executor/kv:kv_executor   //chain/state:chain_state   //chain/storage:memory_db   --copt=-fPIC   --linkopt=-fPIC   --force_pic
 
 
 Next phase (when you start migration)

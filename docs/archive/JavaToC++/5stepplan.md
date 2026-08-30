@@ -721,16 +721,16 @@ Use this list to **order experiments and PRs** (each step assumes the previous w
 
 ```bash
 # If resdb_omnet_bridge.cc or .h changed:
-cd /home/yash/DistributedSystemsforAVs/incubator-resilientdb
+cd <repo>/incubator-resilientdb
 # Note: in some WSL setups Bazel default cache may be unwritable; force /tmp.
 bazel --output_user_root=/tmp/bazel build //integration/omnet:resdb_omnet_bridge
 
 # Always (picks up Veins .cc + new .so):
-cd /home/yash/DistributedSystemsforAVs/veins-veins-5.3.1
+cd <repo>/veins-veins-5.3.1
 make -j$(nproc)
 
 # Run:
-cd /home/yash/DistributedSystemsforAVs/fourway
+cd <repo>/fourway
 runomnetnogui -c BFTOverV2VWithResilientDB
 ```
 
@@ -944,15 +944,15 @@ These are in `resdb_omnet_bridge.h/.cc`. Add only if 4e is needed.
 
 ```bash
 # 1. Bridge (if resdb_omnet_bridge.cc/.h changed)
-cd /home/yash/DistributedSystemsforAVs/incubator-resilientdb
+cd <repo>/incubator-resilientdb
 bazel --output_user_root=/tmp/bazel build //integration/omnet:resdb_omnet_bridge
 
 # 2. Veins (always)
-cd /home/yash/DistributedSystemsforAVs/veins-veins-5.3.1
+cd <repo>/veins-veins-5.3.1
 make -j$(nproc)
 
 # 3. Run (Byzantine follower — done)
-cd /home/yash/DistributedSystemsforAVs/fourway
+cd <repo>/fourway
 runomnetnogui -c BFTOverV2VWithResilientDBByz
 
 # 4. Run (Byzantine primary — next)

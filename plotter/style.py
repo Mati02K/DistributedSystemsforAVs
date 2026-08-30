@@ -2,7 +2,7 @@
 
 Before this module each analyzer set its own DPI (5 different values across the
 scripts), its own figure size (~15 variants) and its own colors, so no two
-figures in the thesis matched. Everything visual is decided here.
+figures in the set matched. Everything visual is decided here.
 
 Palette
 -------
