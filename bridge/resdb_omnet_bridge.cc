@@ -1653,20 +1653,26 @@ extern "C" void* ResdbOmnetCreateKvServer(char* config_file,
           }
 
           // Check 10: state-field match for SIGNED entries.
-          if (pe.lane             != ce.lane             ||
-              pe.position_in_lane != ce.position_in_lane ||
-              pe.direction        != ce.direction        ||
-              pe.is_ambulance     != ce.is_ambulance) {
+          if (pe.lane                != ce.lane                ||
+              pe.position_in_lane    != ce.position_in_lane    ||
+              pe.direction           != ce.direction           ||
+              pe.is_ambulance        != ce.is_ambulance        ||
+              pe.physical_lane_index != ce.physical_lane_index ||
+              pe.lateral_claim_cm    != ce.lateral_claim_cm) {
             LOG(ERROR) << "[OMNET-PREVERIFY] reject: state-field mismatch"
                        << " replica_id=" << ce.replica_id
                        << " cert(lane=" << (int)ce.lane
                        << " pos="       << (int)ce.position_in_lane
                        << " dir="       << (int)ce.direction
-                       << " ambu="      << (int)ce.is_ambulance << ")"
+                       << " ambu="      << (int)ce.is_ambulance
+                       << " plane="     << (int)ce.physical_lane_index
+                       << " latcm="     << ce.lateral_claim_cm << ")"
                        << " proposal(lane=" << (int)pe.lane
                        << " pos="           << (int)pe.position_in_lane
                        << " dir="           << (int)pe.direction
-                       << " ambu="          << (int)pe.is_ambulance << ")"
+                       << " ambu="          << (int)pe.is_ambulance
+                       << " plane="         << (int)pe.physical_lane_index
+                       << " latcm="         << pe.lateral_claim_cm << ")"
                        << " epoch=" << hdr.epoch;
             return false;
           }

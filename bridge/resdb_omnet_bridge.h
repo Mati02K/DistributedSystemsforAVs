@@ -97,10 +97,12 @@ typedef struct ResdbVehicleEntry {
     uint64_t sim_time_us;       /* 8 bytes — simTime() at stop-zone entry; UINT64_MAX = QUIET */
     uint8_t  is_ambulance;      /* 1 byte  — non-zero means emergency priority */
     uint8_t  lane;              /* 1 byte  — 0=N,1=S,2=E,3=W */
-    uint8_t  direction;         /* 1 byte  — 0=Straight,1=Left,2=Right */
+    uint8_t  direction;         /* 1 byte  — 0=Straight,1=Left,2=Right,3=Unknown */
     uint8_t  position_in_lane;  /* 1 byte  — 1=front,2=second,… */
     uint8_t  cyber_status;      /* 1 byte  — 0=QUIET,1=SIGNED */
-} ResdbVehicleEntry;            /* 17 bytes total */
+    uint8_t  physical_lane_index; /* 1 byte — 0=outer,1=inner; 0xFF = not claimed */
+    int32_t  lateral_claim_cm;    /* 4 bytes — signed lane-normal claim, cm */
+} ResdbVehicleEntry;            /* 22 bytes total */
 
 /* Header of the payload passed to ResdbOmnetTriggerConsensus:
  *   [0..3]   uint32_t epoch
@@ -335,9 +337,11 @@ typedef struct ResdbCertEntry {
     int32_t replica_id;
     uint8_t lane;             /* 0=N,1=S,2=E,3=W — same encoding as ResdbVehicleEntry */
     uint8_t position_in_lane; /* 1=front, 2=second, … */
-    uint8_t direction;        /* 0=Straight,1=Left,2=Right */
+    uint8_t direction;        /* 0=Straight,1=Left,2=Right,3=Unknown */
     uint8_t is_ambulance;     /* 0 or 1 */
-} ResdbCertEntry;             /* 8 bytes */
+    uint8_t physical_lane_index; /* 0=outer,1=inner; 0xFF = not claimed */
+    int32_t lateral_claim_cm;    /* signed lane-normal declaration, cm */
+} ResdbCertEntry;             /* 13 bytes */
 #pragma pack(pop)
 
 /* Callback filled in by the OMNeT++ app to give the bridge a snapshot of the

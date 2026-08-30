@@ -173,7 +173,9 @@ std::vector<uint8_t> ResDBIntersectionApp::serializeArrivalCert(const ArrivalCer
        << cert.positionInLane << "|"
        << dirToStr(cert.direction) << "|"
        << (cert.isAmbulance ? "1" : "0") << "|"
-       << cert.epoch;
+       << cert.epoch          << "|"
+       << cert.lateralClaimCm << "|"
+       << cert.physicalLaneIndex;
     for (const auto& echo : cert.echoes) {
         std::vector<uint8_t> pubVec(echo.signerPubKey, echo.signerPubKey + CRYPTO_PUBKEY_BYTES);
         std::vector<uint8_t> sigVec(echo.signature, echo.signature + echo.signatureLen);
@@ -192,14 +194,16 @@ ResDBIntersectionApp::deserializeArrivalCert(BFTMessage* msg)
     std::string s(payload.begin(), payload.end());
     auto parts = splitStr(s, '|');
     ArrivalCert cert;
-    if (parts.size() < 6) return cert;
+    if (parts.size() < 8) return cert;
     cert.carId          = parts[0];
     cert.lane           = parts[1];
     cert.positionInLane = std::stoi(parts[2]);
     cert.direction      = strToDir(parts[3]);
     cert.isAmbulance    = (parts[4] == "1");
-    cert.epoch          = std::stoi(parts[5]);
-    for (size_t i = 6; i < parts.size(); i++) {
+    cert.epoch             = std::stoi(parts[5]);
+    cert.lateralClaimCm    = std::stoi(parts[6]);
+    cert.physicalLaneIndex = std::stoi(parts[7]);
+    for (size_t i = 8; i < parts.size(); i++) {
         size_t colon = parts[i].find(':');
         if (colon == std::string::npos) continue;
         ArrivalEcho echo;
@@ -1132,6 +1136,14 @@ void ResDBIntersectionApp::collectArrivalEcho(const ArrivalEcho& echo, const cha
     cert.direction = state.direction;
     cert.isAmbulance = state.isAmbulance;
     cert.epoch = static_cast<int>(ctx_.current_epoch_);
+    // The lane claim the echoes were collected against. Certifying it here is
+    // what lets a follower check a proposal's lane fields against attested
+    // state instead of trusting the leader to restate them honestly.
+    if (perception_ &&
+            lane_observation_mode_ == LaneObservationMode::ADJACENT_LATERAL) {
+        cert.lateralClaimCm    = perception_->ownLateralClaimCm(simTime());
+        cert.physicalLaneIndex = perception_->projectPhysicalLaneIndex(cert.lateralClaimCm);
+    }
     cert.echoes = echoes;
     if (state.arrival_time_us > 0) {
         const double announceTimeSec = static_cast<double>(state.arrival_time_us) / 1000000.0;

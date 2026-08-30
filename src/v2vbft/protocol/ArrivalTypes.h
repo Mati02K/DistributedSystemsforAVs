@@ -74,6 +74,12 @@ struct ArrivalCert {
     Direction                direction      = DIR_STRAIGHT;
     bool                     isAmbulance    = false;
     int                      epoch          = 0;
+    // Carried through from the announcement this cert attests, so a follower can
+    // check a proposal's lane claim against certified state rather than against
+    // the leader's word. Defaults mean "not claimed", which is the normal case
+    // under CATEGORICAL_CARDINAL where an approach has a single lane.
+    int32_t                  lateralClaimCm    = 0;
+    int                      physicalLaneIndex = -1;
     std::vector<ArrivalEcho> echoes;
 };
 

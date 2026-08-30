@@ -145,6 +145,11 @@ void ResDBIntersectionApp::proposeAll()
         e.replica_id   = rid;
         e.is_ambulance = kv.second.isAmbulance ? 1 : 0;
         e.cyber_status = 1;  // SIGNED — has a valid cert with f+1 echoes
+        // Certified lane claim. 0xFF means the vehicle made none, which is the
+        // normal case with one lane per approach.
+        e.physical_lane_index = kv.second.physicalLaneIndex < 0
+            ? 0xFF : static_cast<uint8_t>(kv.second.physicalLaneIndex);
+        e.lateral_claim_cm    = kv.second.lateralClaimCm;
         if (candidate.vehicleStates.count(kv.first)) {
             const VehicleState& vs = candidate.vehicleStates.at(kv.first);
             e.sim_time_us      = vs.arrival_time_us;
@@ -188,6 +193,8 @@ void ResDBIntersectionApp::proposeAll()
             quiet.is_ambulance = 0;
             quiet.direction    = 0;  // cert-only — unknown without f+1 echoes
             quiet.cyber_status = 0;  // QUIET — no f+1 echoes by timeout
+            quiet.physical_lane_index = 0xFF;  // uncertified: claims nothing
+            quiet.lateral_claim_cm    = 0;
             if (vs) {
                 quiet.lane             = laneCode(vs->lane);
                 quiet.position_in_lane = static_cast<uint8_t>(
@@ -236,6 +243,8 @@ void ResDBIntersectionApp::proposeAll()
             unit.is_ambulance     = 0;
             unit.direction        = 0;
             unit.cyber_status     = 0;           // QUIET — never a scheduled crosser
+            unit.physical_lane_index = 0xFF;     // static unit is in no lane
+            unit.lateral_claim_cm    = 0;
             unit.lane             = 0;
             unit.position_in_lane = 255;         // sort after all real vehicles
             entries.push_back(unit);
@@ -656,6 +665,9 @@ void ResDBIntersectionApp::applyByzantineTamperLane(uint8_t* base, uint32_t n)
                     std::min(cert.positionInLane, 255));
                 out[i].direction        = directionCode(cert.direction);
                 out[i].is_ambulance     = cert.isAmbulance ? 1 : 0;
+                out[i].physical_lane_index = cert.physicalLaneIndex < 0
+                    ? 0xFF : static_cast<uint8_t>(cert.physicalLaneIndex);
+                out[i].lateral_claim_cm    = cert.lateralClaimCm;
                 ++i;
             } catch (...) {}
         }
