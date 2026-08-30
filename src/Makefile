@@ -31,6 +31,7 @@ OBJS = \
     $O/v2vbft/app/ResDBDecision.o \
     $O/v2vbft/app/ResDBDecisionGossip.o \
     $O/v2vbft/app/ResDBIntersectionApp.o \
+    $O/v2vbft/app/ResDBPerception.o \
     $O/v2vbft/app/ResDBRollbackProtocol.o \
     $O/v2vbft/app/ResDBTraCI.o \
     $O/v2vbft/app/ResDBTransport.o \

@@ -469,6 +469,49 @@ void ResDBIntersectionApp::initialize(int stage)
     }
 
     if (stage == 1) {
+        // Perception is configured before discovery opens, because the first
+        // announcement this replica witnesses must already be filtered through
+        // the sensor. Stage 1, not stage 0: it binds to mobility, which does not
+        // exist yet in stage 0.
+        {
+            const std::string modeSpec = par("laneObservationMode").stdstringValue();
+            if (modeSpec == "CATEGORICAL_CARDINAL") {
+                lane_observation_mode_ = LaneObservationMode::CATEGORICAL_CARDINAL;
+            }
+            else if (modeSpec == "ADJACENT_LATERAL") {
+                lane_observation_mode_ = LaneObservationMode::ADJACENT_LATERAL;
+            }
+            else {
+                throw cRuntimeError("laneObservationMode must be CATEGORICAL_CARDINAL "
+                                    "or ADJACENT_LATERAL, got '%s'", modeSpec.c_str());
+            }
+
+            perception_ = std::make_unique<ResDBPerception>();
+            perception_->configure(
+                mobility,
+                getRNG(par("perceptionRngIndex").intValue()),
+                par("approachConfusionMatrix").stdstringValue(),
+                par("approachSigmaM").doubleValue(),
+                par("signalObservationError").doubleValue(),
+                par("lateralObservationSigmaM").doubleValue(),
+                par("longitudinalObservationSigmaM").doubleValue(),
+                lane_observation_mode_ == LaneObservationMode::ADJACENT_LATERAL,
+                par("adjacentLateralOriginX").doubleValue(),
+                par("adjacentLateralOriginY").doubleValue(),
+                par("adjacentLateralNormalX").doubleValue(),
+                par("adjacentLateralNormalY").doubleValue(),
+                par("adjacentLaneSeparationM").doubleValue());
+
+            std::cout << "[PERCEPTION-CONFIG] r" << ctx_.replicaId_
+                      << " mode=" << modeSpec
+                      << " approach_sigma=" << par("approachSigmaM").doubleValue()
+                      << " signal_error=" << par("signalObservationError").doubleValue()
+                      << " lat_sigma=" << par("lateralObservationSigmaM").doubleValue()
+                      << " lon_sigma=" << par("longitudinalObservationSigmaM").doubleValue()
+                      << " gate_k=" << par("physicalGateK").doubleValue()
+                      << " rng=" << par("perceptionRngIndex").intValue()
+                      << "\n";
+        }
         startDiscoveryRound("initial-approach");
         if (par("smokeTestBroadcast").boolValue()) {
             smoke_test_msg_ = new cMessage("resdbSmokeTest");
@@ -1417,7 +1460,16 @@ void ResDBIntersectionApp::finish()
                          static_cast<double>(quietHonestOpportunities_))
                       : 0.0)
               << "\n";
-    
+
+    // The reproducibility check for the sensor. Two runs at the same seed must
+    // draw the same number of times; a zero-noise configuration must draw zero.
+    // Cheapest available evidence that a refactor has not perturbed the noise
+    // stream, which otherwise fails silently as "slightly different results".
+    if (perception_) {
+        std::cout << "[PERCEPTION-RNG] replica=" << ctx_.replicaId_
+                  << " draws=" << perception_->randomDrawCount() << "\n";
+    }
+
     std::cerr << "[FINISH-PROBE] r" << ctx_.replicaId_
     << " handle=" << ctx_.resdb_server_handle_ << std::endl;
 

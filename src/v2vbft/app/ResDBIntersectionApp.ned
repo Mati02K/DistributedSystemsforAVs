@@ -185,5 +185,49 @@ simple ResDBIntersectionApp extends DemoBaseApplLayer
         string intendedDirection   = default("S");    // S/L/R
         string intendedLane        = default("");     // N/S/E/W — explicit cardinal lane (bypasses SUMO edge name parsing); empty = auto-detect from TraCI
 
+        // ── Imperfect perception ──────────────────────────────────────────────
+        // Every default here is the zero-noise identity case, so a run that does
+        // not opt in observes ground truth and behaves exactly as it did before
+        // perception existed. That is deliberate: it keeps the honest path and
+        // the golden invariants unchanged, and makes any measured degradation
+        // attributable to a parameter that was actually set.
+        //
+        // The sensor (ResDBPerception) and the gate are separate knobs. Sigmas
+        // describe how badly a witness sees; physicalGateK describes how much
+        // disagreement the protocol then tolerates. Tuning one must not be
+        // mistaken for tuning the other.
+
+        // Row-stochastic 4x4 over approaches N,S,E,W: entry (i,j) is the
+        // probability a witness reports approach j for a vehicle truly on i.
+        // Identity = perfect cardinal perception. Rows must sum to 1.
+        string approachConfusionMatrix = default("1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 1");
+        double approachSigmaM                              = default(0);
+        // Probability a witness misreads the turn-signal cue.
+        double signalObservationError                      = default(0);
+        // Witness observation noise on the lane-normal (lateral) axis, metres.
+        double lateralObservationSigmaM                    = default(0);
+        // Witness observation noise on distance-to-stop, metres. Drawn only when
+        // observing an already-stopped vehicle, not during arrival.
+        double longitudinalObservationSigmaM               = default(0);
+        // CATEGORICAL_CARDINAL: one lane per approach, N/S/E/W is the whole claim.
+        // ADJACENT_LATERAL: two parallel lanes per approach, so a claim also
+        // names a physical lane index and is checked against a lateral coordinate.
+        string laneObservationMode = default("CATEGORICAL_CARDINAL");
+        // Lane frame for ADJACENT_LATERAL. These are validated against TraCI lane
+        // geometry at init and overwritten from it, so they are a declaration of
+        // intent that must agree with the network, not a free parameter.
+        double adjacentLateralOriginX @unit(m)             = default(0m);
+        double adjacentLateralOriginY @unit(m)             = default(0m);
+        double adjacentLateralNormalX                      = default(0);
+        double adjacentLateralNormalY                      = default(1);
+        double adjacentLaneSeparationM @unit(m)            = default(3.2m);
+        // Gate radius in sigmas: a claim is admitted while its residual is within
+        // k*sigma of what the witness observed. Applies to both the lateral and
+        // the longitudinal residual.
+        double physicalGateK                               = default(3);
+        // Separate RNG stream from the protocol's, so changing perception noise
+        // does not shift the draws that decide anything else.
+        int    perceptionRngIndex                          = default(1);
+
         @display("i=block/app2");
 }

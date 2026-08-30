@@ -25,6 +25,7 @@
 #include "v2vbft/protocol/RollbackTypes.h"
 #include "v2vbft/protocol/OrderCandidate.h"
 #include "v2vbft/app/ResDBDecisionGossip.h"
+#include "v2vbft/app/ResDBPerception.h"
 #include "v2vbft/app/ResDBPropagationTracker.h"
 #include "v2vbft/app/ResDBWitnessCert.h"
 #include "integration/omnet/resdb_omnet_bridge.h"
@@ -510,6 +511,14 @@ private:
 
     // ── State ─────────────────────────────────────────────────────────────────
     std::unique_ptr<IV2VTransport> transport_;
+
+    // ── Perception ────────────────────────────────────────────────────────────
+    // The sensor model standing between TraCI truth and what this replica is
+    // allowed to believe about other vehicles. Configured in stage 1, once
+    // mobility exists. Owned here because it holds the RNG stream and the
+    // derived lane frame for the whole run.
+    std::unique_ptr<ResDBPerception> perception_;
+    LaneObservationMode lane_observation_mode_ = LaneObservationMode::CATEGORICAL_CARDINAL;
 
     cMessage* smoke_test_msg_          = nullptr;
     cMessage* transport_poll_msg_      = nullptr;
