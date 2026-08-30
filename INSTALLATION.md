@@ -98,6 +98,21 @@ automatically, instead of you matching it by hand.
 brew install bazelisk        # macOS
 ```
 
+### Python, for the figure pipeline
+
+`plotter/` needs matplotlib. Recent Pythons refuse system-wide installs
+(PEP 668, "externally-managed-environment"), so use a virtualenv — `.venv/` is
+gitignored:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install matplotlib
+.venv/bin/python -m plotter list
+```
+
+Substitute `.venv/bin/python` for `python3` in the plotter and golden-harness
+commands, or activate the venv first.
+
 ### OpenSSL headers
 
 ```bash

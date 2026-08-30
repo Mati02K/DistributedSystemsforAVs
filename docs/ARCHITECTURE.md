@@ -204,6 +204,9 @@ All inter-vehicle traffic is carried in `BFTMessage` packets over the Veins 802.
 | `14` | CANCEL-commit gossip | Post-CANCEL attestation used to disseminate the committed tombstone and let stragglers begin recovery discovery. | `resdbwire` signed wrapper around `cancelled_epoch || ResdbCancelDecisionHdr`. |
 | `15` | `CLEAR_ECHO` | One-shot witness statement that the blocked executing batch's conflict box remained empty for `clearDwellSec`. | CLEAR statement plus trusted witness id, bound public key, and signature. |
 | `16` | `CLEAR_CERT` | `f+1` CLEAR evidence carried in a carrier-signed envelope. Candidate senders and relays are ranked and cancellable. | `resdbwire` signed wrapper around the unchanged embedded CLEAR certificate. |
+| `18` | `STOPPED_DISTANCE_ATTESTATION` | A stopped vehicle's signed claim of its distance to the stop line, bound by SHA-256 to the arrival claim it continues. | Length-prefixed attestation plus claimant ECDSA signature. |
+| `19` | `STOPPED_DISTANCE_ECHO` | One witness's signed agreement, bound to the exact attestation hash it observed. | Echo with signer's compressed P-256 pubkey and signature. |
+| `20` | `STOPPED_DISTANCE_CERT` | `f+1` distance echoes; queue rank is derived from these instead of from the vehicle's claim. | `"SDC\x01"` length-prefixed binary certificate. |
 | `17` | WAIT heartbeat | Signed advisory lease from the ordinary epoch-`e+1` cert-primary while a crash incident remains BLOCKING. No quorum and no bridge/PBFT meaning. | `resdbwire` signed wrapper around fixed-layout `WaitHeartbeatPayload`. |
 
 Important legacy note: type `9` used to mean Java/BFT-SMaRt client-request broadcast in the JNI architecture. In the current ResDB architecture it is not a client request; it is post-consensus decision gossip.
@@ -502,6 +505,84 @@ CertPrimary = min { rid | collected_certs_ contains veh<rid>, 0 <= rid < totalVe
 If no static cert exists, no node proposes. Nodes continue arrival announcement gossip, cert retries, and timer rechecks until at least one static cert is known.
 
 This means a Byzantine replica 0 that never forms a cert is not selected as the initial proposer. A node that knows a lower certified id than itself behaves as a follower for that local run. If cert visibility is temporarily split, bridge pre-verify prevents a proposal from a higher id from committing at any follower that already holds a lower cert.
+
+---
+
+## 8b. Imperfect Perception and the Stopped-Distance Round
+
+### Why the gate changed
+
+`verifyCarPosition()` asked TraCI where a vehicle really was. That is an oracle
+no deployed vehicle has, and while it stood, "the protocol detects a lane lie"
+was a claim about the simulator rather than about the protocol.
+
+A witness now endorses an arrival claim only if its own observation agrees:
+
+```text
+cardinal : observed approach letter == claimed one
+lateral  : |observed_lateral_cm - claimed_lateral_cm| <= physicalGateK * sigma_lat * 100
+           and the claimed physical lane index == the one the claimed
+           coordinate projects to                     (ADJACENT_LATERAL only)
+```
+
+Rejection reasons are `NO_PERCEPTION`, `WRONG_APPROACH`, `INVALID_PHYSICAL_LANE`
+and `LATERAL_RESIDUAL`, reported on `[PERC-EVAL]`. `verifyCarPosition()` remains
+defined but has no callers on the admission path.
+
+The consequence worth stating plainly: **an honest vehicle can now be refused**,
+because its witness misread it. That is not a defect, it is the physical
+situation the protocol has to survive, and Ablation 6 measures the cost.
+
+### One verdict per claim
+
+Observations are cached per claim, keyed on claim content and deliberately not
+on the signature. A vehicle re-announces on a timer and its announcement is also
+gossiped; without the cache the same claim would draw fresh noise on every
+hearing, letting a liar retry until a draw happened to favour it. A verdict is a
+function of the claim, not of how many times it was heard.
+
+`[PERCEPTION-RNG]` prints the draw count at `finish()`. Two runs at the same
+seed must draw identically, and a zero-noise run must draw zero — the cheapest
+available evidence that a refactor has not perturbed the noise stream.
+
+### The stopped-distance round (types 18/19/20)
+
+An arrival certificate says a vehicle is on the approach it claims. It says
+nothing about how far down the queue it is, and `position_in_lane` was the
+vehicle's own unchecked assertion — a car that overstated it crossed ahead of
+one that did not.
+
+```text
+stopped vehicle ──18──> attestation, bound by SHA-256 to its arrival claim
+witnesses       ──19──> echo, if |observed - claimed| <= physicalGateK * sigma_lon
+f+1 echoes      ──20──> certificate
+                        deriveQueueRanks() -> position_in_lane
+```
+
+The scheduler is unchanged; only the ranks it consumes become attested. Where a
+distance certificate is missing the claimed rank still stands, so one lost frame
+costs attestation rather than liveness.
+
+Discovery closes in two stages: `arrivalViewCertified()` settles the view,
+`discoveryViewCertified()` additionally requires distances when the round is
+enabled. Both halves are governed by `enableStoppedDistanceRound` for the reason
+given in §19 — requiring certificates without running the round stalls the large
+cells past the view-change timer, where ResilientDB fails an assertion in
+`SendViewChangeMsg` rather than degrading; running the round without requiring
+them lets discovery complete before any vehicle has stopped, so nothing is ever
+attested.
+
+### Bridge ABI
+
+`ResdbVehicleEntry` is 22 bytes and `ResdbCertEntry` 13, both carrying
+`physical_lane_index` (`0xFF` = claimed nothing) and `lateral_claim_cm`;
+`direction` gains `3 = Unknown`. Pre-verify Check 10 compares both new fields
+against the certificate, so a leader that restates a car's lane claim is caught
+the same way it already is for lane, position, direction and ambulance flag.
+
+`kSafe` is a table of permitted pairs rather than an array indexed by direction,
+so an Unknown direction matches no row and is structurally forced into a
+singleton batch.
 
 ---
 
@@ -1286,6 +1367,10 @@ Examples:
 | `5` | `BAD_PROPOSAL` | Primary corrupts proposal shape. | Bridge pre-verify rejects PRE_PREPARE; view-change path should recover. |
 | `6` | `FAKE_AMBULANCE` | Primary flips `is_ambulance` 0→1 for the first non-ambulance entry in the proposal. | Pre-verify Check 10 catches the `is_ambulance` mismatch vs cert. Without the firewall (`RESDB_NO_FIREWALL=1`), the fake car receives ambulance crossing priority. |
 | `7` | `FAKE_AMBULANCE_FOLLOWER` | Follower injects `isAmbulance=true` with empty cert bytes into its own `ARRIVAL_ANNOUNCE`. | When `enableAmbulanceCertGate=true`, the echo path rejects uncertified ambulance claims. With the cert gate off, honest echoes accept the claim and the wrong car gets priority. |
+| `9` | `UPGRADE_UNKNOWN_DIRECTION` | Primary rewrites a SIGNED-UNKNOWN direction as declared STRAIGHT, buying batch parallelism the echoes did not support. | Pre-verify Check 10: direction must match the cert. |
+| `10` | `TAMPER_DISTANCE_RANK` | Primary promotes a car to the front of its lane, overriding the certificate-derived rank. | Check 10 compares `position_in_lane` against certified state. |
+| `11` | `TAMPER_PHYSICAL_LANE` | Primary moves a car to the other physical lane of its approach, changing which turns it is authorised to make. | Check 10 compares `physical_lane_index` and `lateral_claim_cm`. |
+| `12` | `SUPPRESS_CERTS` | Primary marks `f+1` certified entries QUIET — the threshold past which omission can no longer be read as channel loss. | Check 9 rejects when `omitted > f`. |
 | `8` | `TAMPER_LANE` | Primary disguises the front E-lane car as S-lane (`position=0`) in the proposal so the scheduler sees N-STRAIGHT + "S"-STRAIGHT as safe to co-batch. The N car (going south) and the E car (going west) are released simultaneously and cross in the intersection center. | Pre-verify Check 10 catches the cert-lane vs proposal-lane mismatch. Without the firewall, the unsafe order is committed and `[CRASH_DETECTED]` is logged post-consensus by each replica. |
 
 ### Experiment scenario wrappers
@@ -1394,6 +1479,32 @@ Defined in `ResDBIntersectionApp.ned`.
 | `intendedDirection` | `S`, `L`, or `R`, used in announcements. |
 | `intendedLane` | Optional `N/S/E/W` override to avoid SUMO lane-name ambiguity. |
 
+### Imperfect perception
+
+Every default is the zero-noise identity case, so a configuration that does not
+opt in observes ground truth and behaves as it did before perception existed.
+
+| Parameter | Meaning |
+|-----------|---------|
+| `approachConfusionMatrix` | Row-stochastic 4x4 over `N,S,E,W`: entry (i,j) is the probability a witness reports approach j for a vehicle truly on i. Identity = perfect perception; rows must sum to 1. Generated from real lane geometry by `scenarios/fourway/generate_perception_matrices.py`. |
+| `approachSigmaM` | Guard only: with an identity matrix and sigma 0, `sampleApproach()` short-circuits to truth and consumes no RNG draw. |
+| `signalObservationError` | Probability a witness misreads the turn-signal cue. |
+| `lateralObservationSigmaM` | Witness observation noise on the lane-normal axis, metres. |
+| `longitudinalObservationSigmaM` | Witness observation noise on distance-to-stop. Drawn only when observing an already-stopped vehicle, never during arrival. |
+| `laneObservationMode` | `CATEGORICAL_CARDINAL` (one lane per approach) or `ADJACENT_LATERAL` (two parallel lanes, so a claim also names a physical lane index checkable against a lateral coordinate). |
+| `adjacentLateralOriginX/Y`, `adjacentLateralNormalX/Y`, `adjacentLaneSeparationM` | Lane frame for `ADJACENT_LATERAL`. Validated against TraCI lane geometry at init and overwritten from it — a declaration of intent that must agree with the network, not a free parameter. |
+| `physicalGateK` | Gate radius in sigmas. A claim is admitted while its residual is within `k*sigma` of what the witness observed; applies to both lateral and longitudinal residuals. |
+| `perceptionRngIndex` | RNG stream for the sensor, default `1`. Requires `num-rngs = 2`. Separate from the protocol's stream so changing noise never shifts a draw that decides anything else. |
+
+### Stopped-distance certificate round
+
+| Parameter | Meaning |
+|-----------|---------|
+| `enableStoppedDistanceRound` | Default `false`. Enables types 18/19/20 **and** makes discovery wait for a distance certificate per intent. Both, deliberately: requiring the certs without running the round stalls large cells past the view-change timer, and running the round without requiring them lets discovery complete before any vehicle has stopped, so nothing is ever attested. Budget `pbftVcTimeoutSec` when enabling. |
+| `distanceStationarySpeedMps` | Speed below which a vehicle counts as stopped. Not zero: SUMO leaves a residual velocity, and requiring exact zero never fires. |
+| `stoppedDistanceAttestationRetryIntervalSec`, `stoppedDistanceAttestationRetryMax` | Bounded retransmission of the type-18 attestation. A witness that misses it cannot echo, and a vehicle short of `f+1` echoes loses its attested rank. |
+| `directionEligibilityCollectionWindowSec` | After `f+1` echoes arrive, keep collecting for this long before finalising. The threshold is the earliest a certificate *can* form, not the point at which every witness has been heard. |
+
 ### CANCEL and post-CANCEL ordering
 
 | Parameter | Meaning |
@@ -1470,6 +1581,13 @@ Common log markers used by benchmark scripts and debugging:
 | `[CLEAR-ECHO-HUSH]` | Late CLEAR echo ignored before accumulation because a candidate/cert/CLEARED state already exists. |
 | `[WAIT-SEND]`, `[WAIT-ACCEPT]`, `[WAIT-REJECT]`, `[WAIT-STOP]` | Advisory WAIT lease lifecycle; these are app-level logs, not PBFT decisions. |
 | `[VC-DEBUG]`, `[VC-TRIGGER]`, `[APP-VC]` | View-change instrumentation. |
+| `[PERCEPTION-CONFIG]` | Sensor model configured at stage 1: mode, sigmas, gate radius, RNG stream, and whether the distance round is enabled. |
+| `[PERCEPTION-RNG]` | Draw count at `finish()`. Zero for a zero-noise run; equal across two runs at the same seed. The reproducibility check for the sensor. |
+| `[PERC-EVAL]` | One arrival-gate verdict: claimed vs observed vs true approach, lateral residual against tolerance, and the reason (`NO_PERCEPTION`, `WRONG_APPROACH`, `INVALID_PHYSICAL_LANE`, `LATERAL_RESIDUAL`, `OK`). |
+| `[DISTANCE-COLLECTION-BEGIN]` | Discovery closed on arrivals and opened the distance round. |
+| `[STOPPED-DISTANCE-ATTEST]`, `[DIST-PERC-EVAL]` | A vehicle attested its distance; a witness evaluated one against its own observation. |
+| `[DIST-CERT-COLLECT]`, `[DIST-CERT-ASSEMBLE]`, `[DIST-CERT-STORED]` | Distance-echo accumulation, local certificate assembly, and receipt of another car's certificate. |
+| `[DIST-ATTEST-PENDING]` | An attestation arrived before its arrival cert; parked until the claim hash is known, then replayed. |
 | `[OMNET-PREVERIFY]` | Bridge PRE_PREPARE pre-verify result. |
 | `[EXECUTOR]`, `[EXEC-CB]` | ResDB executor and order callback logs. |
 | `[CRASH_DETECTED]` | Emitted by `detectUnsafeBatch()` after order delivery. Identifies the batch index, both vehicle IDs, and their cert lanes. Fires on every honest replica that processes the committed order. Indicates a Byzantine leader committed an order that the firewall (Check 10) would have rejected. |

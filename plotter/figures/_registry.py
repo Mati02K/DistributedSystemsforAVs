@@ -42,6 +42,7 @@ from . import (
     ab3_baseline,
     ab4_priority,
     ab5_rollback,
+    ab6_perception,
     an_cost_decomposition,
 )
 
@@ -51,6 +52,7 @@ FIGURE_MODULES = (
     ab3_baseline,
     ab4_priority,
     ab5_rollback,
+    ab6_perception,
     an_cost_decomposition,
 )
 

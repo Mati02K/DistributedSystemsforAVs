@@ -55,3 +55,6 @@ __pycache__/
 .settings/
 .csettings/
 .qtenvrc
+
+# Python virtualenv for the plotter (see INSTALLATION.md)
+.venv/
