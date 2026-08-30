@@ -58,3 +58,6 @@ __pycache__/
 
 # Python virtualenv for the plotter (see INSTALLATION.md)
 .venv/
+
+# Codex agent config, local to a workstation
+.codex/
