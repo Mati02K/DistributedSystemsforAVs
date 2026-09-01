@@ -171,6 +171,10 @@ def parse_log(path, key: RunKey | None = None) -> RunRecord:
 
             if RE_ORDER_DECIDED.search(line):
                 rec.committed = True
+                if rec.n_batches is None:
+                    mb = RE_ORDER_BATCHES.search(line)
+                    if mb:
+                        rec.n_batches = int(mb.group(2))
 
             if m := RE_MESSAGES_SENT.search(line):
                 # cumulative: last value per replica wins

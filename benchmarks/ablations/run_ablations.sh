@@ -14,7 +14,7 @@
 #   5  rollback        — late-emergency outcome and its throughput cost
 #
 # Usage (inside opp_env, with veins_launchd running on :9999):
-#   benchmarks/ablations/run_ablations.sh <1|2|3|4|5|6|all> [reps]
+#   benchmarks/ablations/run_ablations.sh <1|2|3|4|5|6|7|all> [reps]
 # ─────────────────────────────────────────────────────────────────────────────
 set -uo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -283,10 +283,36 @@ ablation6() {
   done
 }
 
+# ── 7: one lane vs two lanes per approach ────────────────────────────────────
+# The scheduler used to refuse to batch any two vehicles from the same approach.
+# With two lanes that is wrong: an inner-lane left-turner and an outer-lane
+# straight-goer leave by different roads and a signalised junction runs them
+# together. This measures what the second lane actually buys.
+#
+# The arms are NOT the same physical world, and the difference is controlled
+# rather than ignored: the two-lane junction has a larger radius, so its
+# configs correct stopDistance to 5 - 3.2/(N/2) and both arms begin their stop
+# zone the same distance from the junction centre. Without that every delay
+# number here would carry the offset that already invalidates ablation 3.
+ablation7() {
+  echo "### Ablation 7: one lane vs two lanes ###"
+  local -A TWO=( [4]=FourVehiclesTwoLaneScaleResDB [8]=EightVehiclesTwoLaneScaleResDB
+                 [16]=SixteenVehiclesTwoLaneResDB  [20]=TwentyVehiclesTwoLaneScaleResDB )
+  for r in $(seq 1 "$REPS"); do
+    for n in 4 8 16 20; do
+      local ini="$RES/_a7_n${n}.ini"; common_ini "$ini" "$r"
+      echo "  N=$n rep=$r one-lane"
+      run "ab7_one_n${n}_rep${r}.log" "${WORD[$n]}VehiclesResDB" -f "$ini"
+      echo "  N=$n rep=$r two-lane"
+      run "ab7_two_n${n}_rep${r}.log" "${TWO[$n]}" -f "$ini"
+    done
+  done
+}
+
 case "$WHICH" in
   1) ablation1 ;; 2) ablation2 ;; 3) ablation3 ;;
-  4) ablation4 ;; 5) ablation5 ;; 6) ablation6 ;;
-  all) ablation1; ablation3; ablation4; ablation2; ablation5; ablation6 ;;
-  *) echo "usage: run_ablations.sh <1|2|3|4|5|6|all> [reps]"; exit 1 ;;
+  4) ablation4 ;; 5) ablation5 ;; 6) ablation6 ;; 7) ablation7 ;;
+  all) ablation1; ablation3; ablation4; ablation2; ablation5; ablation6; ablation7 ;;
+  *) echo "usage: run_ablations.sh <1|2|3|4|5|6|7|all> [reps]"; exit 1 ;;
 esac
 echo "ABLATION_${WHICH}_DONE results in $RES"

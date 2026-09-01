@@ -43,6 +43,7 @@ from . import (
     ab4_priority,
     ab5_rollback,
     ab6_perception,
+    ab7_twolane,
     an_cost_decomposition,
 )
 
@@ -53,6 +54,7 @@ FIGURE_MODULES = (
     ab4_priority,
     ab5_rollback,
     ab6_perception,
+    ab7_twolane,
     an_cost_decomposition,
 )
 

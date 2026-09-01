@@ -38,6 +38,11 @@ class RunRecord:
 
     # ── consensus outcome ────────────────────────────────────────────────────
     committed: bool = False          # an epoch-0 ORDER decided at all
+    # Committed schedule length. Every replica reports the same value for a
+    # given order, so the first one seen is the answer; a run that never
+    # committed leaves it None rather than 0, which would read as a perfectly
+    # parallel schedule instead of an absent one.
+    n_batches: Optional[int] = None
 
     # ── attack outcome ───────────────────────────────────────────────────────
     # A fake-ambulance transaction that got granted priority. Present => the
