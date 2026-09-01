@@ -590,6 +590,83 @@ code that would set it.
 
 ---
 
+## 8c. Two Lanes per Approach
+
+### Why the rule changed
+
+With one lane per approach, "two vehicles from the same approach never cross
+together" is correct: one is behind the other. With two, it throws away the
+reason the second lane exists. An inner-lane left-turner and an outer-lane
+straight-goer enter the junction from different points and leave by different
+roads; a signalised junction runs them in the same phase.
+
+The conflict rule is now:
+
+```text
+same cardinal approach:
+    same physical lane      -> false   (queue order)
+    different physical lane:
+        same direction      -> false   (same exit, so they would merge)
+        different direction -> TRUE    (diverging)
+different approach          -> the 14-row cross-approach table, unchanged
+```
+
+`physical_lane_index` travels per vehicle, with `0xFF` meaning "claimed no
+lane". Single-lane runs send `0xFF` on every entry, which short-circuits to the
+old behaviour before the new logic is consulted — so the scheduler needs no mode
+flag and the single-lane path is preserved by a sentinel rather than by a second
+code path.
+
+### One definition, two consumers
+
+`bridge/resdb_conflict_matrix.h` holds the table and the predicate. The bridge
+scheduler uses it to build batches; the app's `detectUnsafeBatch()` uses it to
+check committed orders under cert-attested state. Those two previously held
+byte-identical copies kept in step by a comment. The checker is only meaningful
+if it disagrees with the scheduler because a leader lied — never because the
+tables drifted.
+
+The scheduler also re-tests every emitted batch against the predicate and logs
+`[SCHEDULER-UNSAFE-BATCH]` on a violation. Batch growth already guarantees the
+property, so a violation means the greedy loop and the predicate have diverged.
+
+### Queue order is per physical lane
+
+`SameQueue()` decides who is behind whom: same approach, and — where both claim
+one — same physical lane. `deriveQueueRanks()` already grouped ranks by
+`lane:physicalLaneIndex`, so under two lanes two cars legitimately share
+`position_in_lane = 1`. Keying order on the approach alone would invent an
+ordering between them and serialise the pair the lane was added for. The
+ambulance blocker scan uses the same predicate.
+
+### The fixture, and comparability
+
+`bft_intersection_2lane.net.xml`: four approaches, two lanes each, uniform
+policy lane 0 = straight+right, lane 1 = left, 3.20 m centreline separation,
+all-red TLS (the protocol owns release). Regenerable from
+`scenarios/fourway/two_lane_source/` via netconvert.
+
+Its junction radius is larger, so approaches are 289.60 m rather than 292.80 m
+and lanes end 10.40 m from centre rather than 7.20 m. Because the stop zone is
+measured from the lane end and scaled by `totalVehicles/2`, an uncorrected
+two-lane arm begins its stop zone 3.2 m further out and every comparison against
+the single-lane arm inherits that offset. `SixteenVehiclesTwoLaneResDB` sets
+`stopDistance = 4.6m` so both arms trigger 47.20 m from the junction centre;
+general form `5 - 3.2/(N/2)`.
+
+### Measured
+
+At N=16, both arms committing 16/16 and resuming 16/16:
+
+| Arm | Batches |
+|---|---|
+| one lane | 9 |
+| two lanes | **7** |
+
+Zero unsafe pairs, zero `[CRASH_DETECTED]`, zero pre-verify rejections.
+
+---
+
 ## 9. ResDB Bridge and Socketless PBFT
 
 The C bridge is the only dependency boundary between Veins and ResDB. Veins includes `resdb_omnet_bridge.h` and calls C functions. Internal ResDB C++ headers stay on the ResDB side.
@@ -1592,6 +1669,7 @@ Common log markers used by benchmark scripts and debugging:
 | `[STOPPED-DISTANCE-ATTEST]`, `[DIST-PERC-EVAL]` | A vehicle attested its distance; a witness evaluated one against its own observation. |
 | `[DIST-CERT-COLLECT]`, `[DIST-CERT-ASSEMBLE]`, `[DIST-CERT-STORED]` | Distance-echo accumulation, local certificate assembly, and receipt of another car's certificate. |
 | `[DIST-ATTEST-PENDING]` | An attestation arrived before its arrival cert; parked until the claim hash is known, then replayed. |
+| `[SCHEDULER-UNSAFE-BATCH]` | The scheduler emitted a batch containing a pair its own safety predicate rejects. Should never appear; means the greedy loop and the conflict rule have diverged. |
 | `[OMNET-PREVERIFY]` | Bridge PRE_PREPARE pre-verify result. |
 | `[EXECUTOR]`, `[EXEC-CB]` | ResDB executor and order callback logs. |
 | `[CRASH_DETECTED]` | Emitted by `detectUnsafeBatch()` after order delivery. Identifies the batch index, both vehicle IDs, and their cert lanes. Fires on every honest replica that processes the committed order. Indicates a Byzantine leader committed an order that the firewall (Check 10) would have rejected. |
