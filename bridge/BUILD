@@ -10,6 +10,7 @@ cc_library(
         "resdb_omnet_bridge.cc",
     ],
     hdrs = [
+        "resdb_conflict_matrix.h",
         "resdb_intersection_scheduler.h",
         "resdb_omnet_bridge.h",
     ],

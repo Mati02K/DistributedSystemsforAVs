@@ -85,11 +85,12 @@ int ResdbOmnetUpdateSimTimeUs(void* server_handle, int64_t now_us);
 
 /* ── Step 5: wire format (shared between Veins and ResDB bridge) ───────────── */
 
-/* One vehicle's arrival state.  17 bytes, no padding.
+/* One vehicle's arrival state.  22 bytes, no padding.
  * Appears in the ProposeAll payload (Veins → ResDB bridge).
  * lane:     0=N, 1=S, 2=E, 3=W
- * direction: 0=Straight, 1=Left, 2=Right
+ * direction: 0=Straight, 1=Left, 2=Right, 3=Unknown (no f+1 cue agreement)
  * position_in_lane: 1=front, 2=second, …
+ * physical_lane_index: 0=outer, 1=inner, 0xFF=no lane claimed (single-lane runs)
  * cyber_status: 0=QUIET (no f+1 echoes), 1=SIGNED */
 #pragma pack(push, 1)
 typedef struct ResdbVehicleEntry {
@@ -109,7 +110,7 @@ typedef struct ResdbVehicleEntry {
  *   [4..7]   int32_t  leader_id
  *   [8..15]  uint64_t propose_sim_time_us
  *   [16..19] uint32_t n_vehicles
- *   [20..]   n_vehicles × ResdbVehicleEntry (17 bytes each)
+ *   [20..]   n_vehicles × ResdbVehicleEntry (22 bytes each)
  */
 typedef struct ResdbProposeHdr {
     uint32_t epoch;

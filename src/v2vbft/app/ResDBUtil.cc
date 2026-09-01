@@ -88,6 +88,11 @@ uint8_t directionCode(Direction direction)
 {
     if (direction == DIR_LEFT) return 1;
     if (direction == DIR_RIGHT) return 2;
+    // DIR_UNKNOWN must survive to the wire as 3, not collapse to STRAIGHT.
+    // The conflict matrix has no row for 3, so an unresolved turn cue is
+    // structurally forced into a singleton batch; mapping it to 0 instead would
+    // schedule a car nobody could agree about as a confident straight-goer.
+    if (direction == DIR_UNKNOWN) return 3;
     return 0;
 }
 

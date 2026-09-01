@@ -2,6 +2,11 @@
 #include "v2vbft/app/ResDBUtil.h"
 #include "v2vbft/app/ResdbV2VWire.h"
 
+// The one definition of which vehicles may cross together, shared with the
+// bridge scheduler so the post-commit checker cannot drift from the rule that
+// produced the batches.
+#include "integration/omnet/resdb_conflict_matrix.h"
+
 
 #include <algorithm>
 #include <cstdint>
@@ -373,30 +378,19 @@ void ResDBIntersectionApp::proposeAll()
 }
 
 // ── Crash detection ──────────────────────────────────────────────────────────
-// Mirrors the kSafe table in resdb_intersection_scheduler.cc.  Runs on the
-// COMMITTED order using cert lanes (not proposal lanes) so a Byzantine-spoofed
-// proposal that sneaks through without the firewall is caught here.
+// Shares one safety definition with the scheduler (resdb_conflict_matrix.h)
+// rather than mirroring it. Runs on the COMMITTED order using CERT-attested
+// lanes, not proposal lanes, so a Byzantine-spoofed proposal that sneaks past a
+// disabled firewall is caught here.
+//
+// The distinction is the whole point: this must disagree with the scheduler only
+// when the leader lied about a vehicle's state, never because two copies of the
+// table drifted apart.
 
 bool ResDBIntersectionApp::detectUnsafeBatch(
     const ResdbVehicleDecision* decisions, uint32_t n, uint32_t n_batches)
 {
     bool detected = false;
-    // Keep in lockstep with resdb_intersection_scheduler.cc. The last row is
-    // the protected-left pair: two opposing lefts never cross each other.
-    static const uint8_t kSafe[14][4] = {
-        {0, 0, 1, 0}, {2, 0, 3, 0}, {0, 2, 1, 2}, {0, 2, 2, 2},
-        {0, 2, 3, 2}, {1, 2, 2, 2}, {1, 2, 3, 2}, {2, 2, 3, 2},
-        {0, 2, 1, 0}, {1, 2, 0, 0}, {2, 2, 3, 0}, {3, 2, 2, 0},
-        {0, 1, 1, 1}, {2, 1, 3, 1},
-    };
-    auto isSafe = [&](uint8_t la, uint8_t da, uint8_t lb, uint8_t db) {
-        if (la == lb) return false;
-        for (const auto& p : kSafe)
-            if ((la==p[0]&&da==p[1]&&lb==p[2]&&db==p[3]) ||
-                (la==p[2]&&da==p[3]&&lb==p[0]&&db==p[1])) return true;
-        return false;
-    };
-
     // Group replica IDs by batch.
     std::vector<std::vector<int32_t>> batches(n_batches);
     for (uint32_t i = 0; i < n; ++i)
@@ -412,12 +406,18 @@ bool ResDBIntersectionApp::detectUnsafeBatch(
             if (itA == ctx_.collected_certs_.end()) continue;
             uint8_t la = laneCode(itA->second.lane);
             uint8_t da = directionCode(itA->second.direction);
+            uint8_t pa = itA->second.physicalLaneIndex < 0
+                ? resdb::omnet::kNoPhysicalLane
+                : static_cast<uint8_t>(itA->second.physicalLaneIndex);
             for (size_t j = i + 1; j < members.size(); ++j) {
                 auto itB = ctx_.collected_certs_.find("veh" + std::to_string(members[j]));
                 if (itB == ctx_.collected_certs_.end()) continue;
                 uint8_t lb = laneCode(itB->second.lane);
                 uint8_t db = directionCode(itB->second.direction);
-                if (!isSafe(la, da, lb, db)) {
+                uint8_t pb = itB->second.physicalLaneIndex < 0
+                    ? resdb::omnet::kNoPhysicalLane
+                    : static_cast<uint8_t>(itB->second.physicalLaneIndex);
+                if (!resdb::omnet::IsSafeToBatch(la, da, pa, lb, db, pb)) {
                     detected = true;
                     std::string crashRef = "unsafe_batch:" + std::to_string(ctx_.current_epoch_) +
                         ":" + std::to_string(b) +

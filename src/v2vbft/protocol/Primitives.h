@@ -16,20 +16,26 @@ namespace v2vbft {
 
 // Which way a vehicle intends to leave the junction.
 //
-// DIR_UNKNOWN is not a fourth intent — it is the absence of one. Under imperfect
-// perception a witness may fail to read a vehicle's turn signal, so a direction
-// is only certified when f+1 echoes independently observed the same cue. Short of
-// that the cert carries DIR_UNKNOWN, and because the executor's kSafe table has
-// no row for it, such a vehicle is structurally forced into a singleton batch
-// rather than being guessed into someone else's.
+// DIR_UNKNOWN is not a fourth intent — it is the absence of one. The intent is
+// that under imperfect perception a direction is certified only when f+1 echoes
+// independently observed the same turn cue, and short of that the cert carries
+// DIR_UNKNOWN. The conflict matrix has no row for it, so such a vehicle is
+// structurally forced into a singleton batch rather than guessed into someone
+// else's.
+//
+// NOT YET REACHABLE: the eligibility rule that would downgrade a declaration
+// (eligibleDirection(), enableDirectionEligibility) is not ported, so nothing
+// currently produces DIR_UNKNOWN. The encoding and the singleton property are in
+// place and tested; what is missing is the producer.
 enum Direction { DIR_STRAIGHT = 0, DIR_LEFT = 1, DIR_RIGHT = 2, DIR_UNKNOWN = 3 };
 
 // What a witness believes it saw of a vehicle's maneuver cue (its turn signal).
 //
 // Distinct from Direction on purpose: Direction is what a vehicle *declares* and
 // what consensus certifies, ObservedCue is one witness's noisy reading of the
-// physical blinker. They are compared, never conflated -- eligibleDirection()
-// downgrades a declaration to DIR_UNKNOWN unless enough independent cues agree.
+// physical blinker. They are compared, never conflated -- the intended rule is
+// that a declaration is downgraded to DIR_UNKNOWN unless enough independent cues
+// agree. That rule is not ported yet; see the note on Direction above.
 enum class ObservedCue : uint8_t {
     STRAIGHT = 0,
     LEFT     = 1,

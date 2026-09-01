@@ -582,7 +582,11 @@ the same way it already is for lane, position, direction and ambulance flag.
 
 `kSafe` is a table of permitted pairs rather than an array indexed by direction,
 so an Unknown direction matches no row and is structurally forced into a
-singleton batch.
+singleton batch. Note the producer of that value — the direction-eligibility
+rule that downgrades a declaration when fewer than `f+1` witnesses agree on the
+turn cue — is not ported yet, so `DIR_UNKNOWN` is currently unreachable. The
+encoding is correct and the isolation property holds; what is missing is the
+code that would set it.
 
 ---
 
