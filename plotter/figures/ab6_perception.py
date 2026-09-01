@@ -22,11 +22,22 @@ Sensor error first costs echoes, which costs certificates; only once
 certificates are scarce enough to threaten f+1 does it cost a commit; and only a
 lost commit costs a crossing.
 
-Panel 1 is points, not a curve. Only replicas that assemble a certificate emit
-Cert_Collection_Duration, so a cell can hold one or two observations rather than
-one per vehicle, and a mean over two very different values is an artefact rather
-than a central tendency -- see docs/ablations.md section 6 for the measured
-samples. Repetitions are what turn it into a curve. Reading them together is what distinguishes
+There is a frontier at sigma ~= 0.5 m. Below it every configuration commits
+100% of the time and the cost is paid entirely in collection latency. Above it
+consensus fails, and the larger the junction the harder: at sigma = 2.0 the
+commit rate is 100% at N=4, 67% at N=8, 33% at N=12 and 0% at N=16 and N=20.
+More witnesses means more chances that some vehicle cannot reach f+1 agreement,
+so scale hurts rather than helps here.
+
+Read the crossings panel with care: it stays high even where the commit rate is
+zero, because the stop-sign timeout releases vehicles that consensus never
+scheduled. Vehicles cleared is therefore NOT a measure of protocol success --
+it is the safety fallback working. Only the middle panel says whether the
+protocol did its job.
+
+At 3 repetitions the commit-rate panel resolves the frontier but not its shape:
+N=12 fails at sigma=1.0 while N=16 does not, which is sampling rather than a
+real inversion. Locating the frontier per N needs more reps than this. Reading them together is what distinguishes
 "degraded but safe" from "broken" — a run that commits nothing is safe and
 useless, and a single commit-rate panel cannot tell you which you are looking
 at.
@@ -98,6 +109,6 @@ def build(data, axes):
 
     fig = axes.flat[0].get_figure()
     fig.suptitle(
-        "Ablation 6 — perception error is absorbed by certificate collection "
-        "before it reaches consensus",
+        "Ablation 6 — perception error is absorbed up to sigma 0.5; past it "
+        "consensus fails, and worse at scale",
         fontsize=12, color=style.INK_PRIMARY)
