@@ -23,11 +23,26 @@ int CompareLaneQueueOrder(const ResdbVehicleEntry& a,
   return 0;
 }
 
+// Two vehicles are in the same physical queue when they share an approach and,
+// where they claim one, a physical lane. Queue order only means anything within
+// such a queue: a left-turner in the inner lane is not behind a straight-goer
+// beside it, and treating it as behind would serialise exactly the pair the
+// second lane exists to run together.
+//
+// Vehicles that claim no lane (0xFF, every single-lane run) fall back to
+// "same approach is same queue", which is what this always did.
+bool SameQueue(const ResdbVehicleEntry& a, const ResdbVehicleEntry& b) {
+  if (a.lane != b.lane) return false;
+  if (a.physical_lane_index == kNoPhysicalLane ||
+      b.physical_lane_index == kNoPhysicalLane) return true;
+  return a.physical_lane_index == b.physical_lane_index;
+}
+
 bool AllSameLaneFrontPlaced(const ResdbVehicleEntry& candidate,
                             const std::vector<ResdbVehicleEntry>& view,
                             const std::unordered_set<int32_t>& placed) {
   for (const auto& v : view) {
-    if (v.lane != candidate.lane) continue;
+    if (!SameQueue(v, candidate)) continue;
     if (CompareLaneQueueOrder(v, candidate) < 0 &&
         placed.find(v.replica_id) == placed.end()) {
       return false;
@@ -77,7 +92,10 @@ IntersectionScheduleResult BuildIntersectionSchedule(
   for (const auto& ambulance : ambulances) {
     std::vector<ResdbVehicleEntry> blockers;
     for (const auto& v : entries) {
-      if (v.lane != ambulance.lane || v.is_ambulance) continue;
+      // Only cars in the ambulance's own queue block it. One in the adjacent
+      // physical lane of the same approach does not, and promoting it would
+      // grant priority to a vehicle that was never in the way.
+      if (!SameQueue(v, ambulance) || v.is_ambulance) continue;
       if (CompareLaneQueueOrder(v, ambulance) < 0) blockers.push_back(v);
     }
     std::sort(blockers.begin(), blockers.end(),
@@ -157,6 +175,31 @@ IntersectionScheduleResult BuildIntersectionSchedule(
     } while (grew);
 
     batches_out.push_back(std::move(batch));
+  }
+
+  // Check the schedule against the rule that produced it, before anyone acts on
+  // it. Batch growth already guarantees this by construction, so a violation
+  // means the greedy loop and the safety predicate have diverged -- which is
+  // precisely the failure that would otherwise reach vehicles as a committed
+  // order and be discovered by a collision. Cheap, and it turns a property
+  // maintained by the shape of the code into one that is actually asserted.
+  for (uint32_t bi = 0; bi < batches_out.size(); ++bi) {
+    const auto& b = batches_out[bi];
+    for (size_t i = 0; i < b.size(); ++i) {
+      for (size_t j = i + 1; j < b.size(); ++j) {
+        if (!IsSafeToBatch(b[i].lane, b[i].direction, b[i].physical_lane_index,
+                           b[j].lane, b[j].direction, b[j].physical_lane_index)) {
+          std::cout << "[SCHEDULER-UNSAFE-BATCH] epoch=" << hdr.epoch
+                    << " batch=" << bi
+                    << " a=r" << b[i].replica_id
+                    << "(lane=" << (int)b[i].lane << " dir=" << (int)b[i].direction
+                    << " plane=" << (int)b[i].physical_lane_index << ")"
+                    << " b=r" << b[j].replica_id
+                    << "(lane=" << (int)b[j].lane << " dir=" << (int)b[j].direction
+                    << " plane=" << (int)b[j].physical_lane_index << ")\n";
+        }
+      }
+    }
   }
 
   result.n_batches = static_cast<uint32_t>(batches_out.size());

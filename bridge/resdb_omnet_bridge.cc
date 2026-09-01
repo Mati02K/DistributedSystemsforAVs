@@ -836,7 +836,8 @@ class IntersectionExecutor : public resdb::TransactionManager {
                 << " pos=" << (int)e.position_in_lane
                 << " dir=" << (e.direction < 3 ? kDirName[e.direction] : "?")
                 << " ambu=" << (int)e.is_ambulance
-                << " cyber=" << (int)e.cyber_status << ")";
+                << " cyber=" << (int)e.cyber_status
+           << " plane=" << (int)e.physical_lane_index << ")";
     }
     std::cout << "\n";
 
