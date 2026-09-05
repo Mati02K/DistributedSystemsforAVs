@@ -231,7 +231,7 @@ cannot drift from the geometry it claims to describe.
 | commit rate | σ=0 | 0.25 | 0.5 | 1.0 | 2.0 |
 |---|---|---|---|---|---|
 | N=4 | 100 | 100 | 100 | 100 | 100 |
-| N=8 | 100 | 100 | 100 | 100 | 67 |
+| N=8 | 100 | 100 | 100 | 33 | 0 |
 | N=12 | 100 | 100 | 100 | 33 | 33 |
 | N=16 | 100 | 100 | 100 | 100 | 0 |
 | N=20 | 100 | 100 | 100 | 0 | 0 |
@@ -252,9 +252,9 @@ commit rate is zero, because the stop-sign timeout releases vehicles consensus
 never scheduled. That is the safety fallback doing its job, not the protocol
 doing its job; only the middle panel distinguishes them.
 
-**Open:** at 3 repetitions the frontier is located but its shape is not. N=12
-fails at sigma 1.0 while N=16 does not, which is sampling, not a real inversion.
-Resolving the frontier per N needs more repetitions.
+**Open:** at 3 repetitions the frontier is located but its shape is not. N=16
+survives sigma 1.0 while N=8 and N=12 do not, which is sampling rather than a
+real inversion. Resolving the frontier per N needs more repetitions.
 
 ---
 
@@ -274,15 +274,18 @@ that pair and only that pair
 | N | batches 1L → 2L | throughput 1L → 2L | delay 1L → 2L |
 |---|---|---|---|
 | 4 | 3.7 → 4.0 | 0.50 → 0.48 | 6.04 → 5.82 |
-| 8 | 7.7 → **4.0** | 0.37 → **0.79** | 14.40 → **6.94** |
+| 8 | 5.7 → **4.0** | 0.61 → **0.79** | 7.38 → **6.95** |
 | 16 | 10.3 → **7.0** | 0.73 → **0.93** | 11.54 → **9.96** |
 | 20 | 12.7 → **10.0** | 0.73 → 0.79 | 13.90 → 14.48 |
 
-**The schedule gets shorter at every load above N=4, and the effect is large.**
-At N=8 the second lane halves the schedule, doubles throughput and cuts delay by
-more than half. The gain narrows as load rises — 24% fewer batches at N=20
-against 48% at N=8 — because with more vehicles per approach the queue behind
-each pair dominates the saving from running the pair together.
+**The schedule gets shorter at every load above N=4, by roughly a third.**
+30% fewer batches at N=8, 32% at N=16, narrowing to 21% at N=20: with more
+vehicles per approach, the queue behind each pair comes to dominate the saving
+from running the pair together. Throughput follows the same shape.
+
+An earlier version of this table reported 48% at N=8 with throughput doubling.
+That was measuring a broken one-lane baseline, not the second lane — see the
+N=8 defect below.
 
 **N=4 is a wash, and should be.** One vehicle per approach means there is rarely
 a same-approach pair to run in parallel, so the second lane has nothing to
